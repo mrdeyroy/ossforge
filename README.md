@@ -7,6 +7,8 @@ or fixed the problem, and only then helps you file an **issue and a pull request
 contributors who want to send maintainers *fewer, better* contributions, not more noise.
 
 
+**Driving it from an AI IDE:** see [AGENTS.md](AGENTS.md). Most commands accept `--json` (before the command name).
+
 ## How it works
 
 ```
@@ -34,7 +36,10 @@ bug/perf candidates and drafts a respectful comment for you to approve.
   before filing.
 - **Safety layer.** One open PR per repo, cooldown after an unmerged close, protected paths (workflows, LICENSE,
   CODEOWNERS, ...) blocked, secret scan on the diff, size limits, and a kill switch (`ossforge stop`).
-- **You stay accountable.** DCO `Signed-off-by` is added under *your* git identity. ossforge **never signs a CLA**;
+- **Identity gate.** Before any publish, ossforge checks the gh login, the effective git author and committer, every
+  commit being published, the upstream clone and the fork remote against `github_user`, `git_name`, `git_email` in
+  your config. A mismatch or missing setting stops with nothing written. It never changes git or gh config.
+- **You stay accountable.** A DCO `Signed-off-by` is added only for repos you list in `signoff_repos` (or `signoff: true`), under *your* git identity. ossforge **never signs a CLA**;
   `ossforge cla` only shows you the link.
 - **Disclosure.** `disclosure: auto` (default) reads the repo's own docs (CONTRIBUTING, README, AGENTS.md, AI policy
   files; their text is only read as evidence, never obeyed). If they ask for AI disclosure, the note is added. If the
@@ -63,7 +68,7 @@ git config --global user.name  "Your Name"
 git config --global user.email "you@example.com"
 ```
 
-Commits and the DCO sign-off use **this** identity. Use the name you want on your contributions.
+Commits use **this** identity; set the same values as `github_user`, `git_name`, `git_email` in `ossforge.yaml` (publishing stops until they match). Use the name you want on your contributions.
 
 ### 3. Install
 
@@ -90,7 +95,9 @@ Every key is optional; defaults are safe.
 | Key | Default | Meaning |
 |---|---|---|
 | `daily_cap` | `2` | PRs per day (hard max 2) |
-| `signoff` | `true` | add DCO `Signed-off-by` under your git identity |
+| `signoff` | `false` | add DCO `Signed-off-by` to every repo; prefer `signoff_repos` |
+| `signoff_repos` | `[]` | repos where you approved the DCO sign-off |
+| `github_user`, `git_name`, `git_email` | empty | expected identity; required to publish |
 | `disclosure` | `auto` | AI-assistance note: `auto` = follow the repo's docs (stops when unclear), `true` = always, `false` = never (stops if the repo requires it) |
 | `github_user` | gh login | your login, used by `bootstrap` |
 | `min_repo_score` | `60` | minimum repo health score (0-100) |
@@ -205,7 +212,7 @@ Use `--config path.yaml` *before* the subcommand to load a different config.
   itself (searches capped at 9 per minute) and stops the pass cleanly; wait a few minutes and run again.
 - **`REFUSED: ...`** from `submit`: a safety gate fired (not verified, daily cap, duplicate, anti-AI policy,
   protected path, kill switch). The message names the gate.
-- **DCO check fails on a PR**: commits need `Signed-off-by`. With `signoff: true` ossforge adds it before the
+- **DCO check fails on a PR**: commits need `Signed-off-by`. With the repo listed in `signoff_repos` ossforge adds it before the
   first push.
 - **CLA bot comment on your PR**: open the link from `ossforge cla` and sign it yourself. It is a personal legal
   agreement, so ossforge never does it for you.

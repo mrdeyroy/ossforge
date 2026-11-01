@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from . import gh, policy, safety, vet
+from . import gh, identity, policy, safety, vet
 from .config import Config
 
 NOTE = "\n\n_This review was prepared with AI assistance and checked by a human before posting._"
@@ -19,6 +19,9 @@ def post(cfg: Config, audit: safety.Audit, repo: str, pr: int, body: str, execut
         safety.kill_switch(cfg)
     except safety.Blocked as e:
         raise Refused(str(e)) from e
+    bad = identity.check_login(cfg)
+    if bad:
+        raise Refused("identity check failed: " + "; ".join(bad) + ". Nothing was posted.")
     if any(r.get("event") == "critique_posted" and r["repo"] == repo and r["pr"] == pr for r in audit.read()):
         raise Refused("already critiqued this PR once; a second comment is noise")
     try:
