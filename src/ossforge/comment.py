@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from . import gh, identity, policy, safety, vet
+from . import gh, identity, policy, policy_review, safety, vet
 from .config import Config
 
 NOTE = "\n\n_This review was prepared with AI assistance and checked by a human before posting._"
@@ -28,6 +28,9 @@ def post(cfg: Config, audit: safety.Audit, repo: str, pr: int, body: str, execut
         files = vet.policy_texts(repo)
     except gh.GhError as e:
         raise Refused(f"could not read policy docs ({e}); not posting") from e
+    why = policy_review.check(cfg, repo)
+    if why:
+        raise Refused(why)
     pol = policy.scan_files(files)
     if pol.anti_ai:
         raise Refused(f"anti-AI policy in {pol.source}")

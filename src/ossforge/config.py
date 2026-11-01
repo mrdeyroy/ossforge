@@ -15,7 +15,6 @@ class Config:
     daily_cap: int = 2
     signoff: bool = False             # add a DCO Signed-off-by to every repo (an attestation: approve it yourself)
     signoff_repos: list[str] = field(default_factory=list)  # per-repo approval of the DCO sign-off, "owner/name"
-    ai_policy_reviewed: list[str] = field(default_factory=list)  # repos whose AI/LLM policy you read and accept, "owner/name"
     git_name: str = ""                # expected commit author/committer name; publishing stops if it differs
     git_email: str = ""               # expected commit author/committer email
     disclosure: bool | str = "auto"   # true | false | "auto": add the AI-assistance note only where the repo asks for it

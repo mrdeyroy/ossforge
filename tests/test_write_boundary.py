@@ -8,7 +8,7 @@ import textwrap
 
 import pytest
 
-from ossforge import gh, queue, safety, submit
+from ossforge import gh, policy_review, queue, safety, submit
 from ossforge.config import Config
 from ossforge.limiter import DailyLimiter
 
@@ -91,6 +91,7 @@ def world(tmp_path, monkeypatch):
                  git_name=ME[0], git_email=ME[1])
     it = queue.Item("a", "acme/lib", "a.py", 1, "k", "d", status="verified", issue_title="t", issue_body="b",
                     pr_title="fix: x", pr_body="b", branch="fix/x", clone=str(clone))
+    policy_review.record(cfg, "acme/lib", {"docs": [], "scanned_locations": []}, "test: no restrictions")
     return dict(cfg=cfg, it=it, clone=clone, log=log, up=up, fork=fork, tmp=tmp_path, mp=monkeypatch,
                 lim=DailyLimiter(tmp_path / "d.json", 2), audit=safety.Audit(tmp_path / "audit.jsonl"))
 
@@ -206,11 +207,24 @@ def test_repo_that_asks_for_dco_is_refused_until_approved(world, monkeypatch):
     assert writes(world["log"]) == []
 
 
-def test_repo_with_ai_policy_doc_stops_until_owner_reviews(world, monkeypatch):
-    from ossforge import vet
-    monkeypatch.setattr(vet, "policy_texts", lambda repo: {".github/AI_POLICY.md": "# Generative AI / LLM Policy\nBe responsible."})
-    with pytest.raises(submit.Refused, match="has an AI/LLM policy"):
+def test_no_policy_review_record_blocks(world):
+    world["cfg"].state_dir = str(world["tmp"] / ".other")
+    with pytest.raises(submit.Refused, match="no policy review recorded"):
         run(world, execute=True)
     assert writes(world["log"]) == []
-    world["cfg"].ai_policy_reviewed = ["acme/lib"]
-    assert run(world)["dry_run"]
+
+
+def test_prohibited_review_blocks_even_though_recorded(world):
+    policy_review.record(world["cfg"], "acme/lib", {"docs": [], "scanned_locations": []}, "bans AI-assisted PRs", prohibited=True)
+    with pytest.raises(submit.Refused, match="recorded as prohibited"):
+        run(world, execute=True)
+    assert writes(world["log"]) == []
+
+
+def test_changed_policy_doc_invalidates_review(world, monkeypatch):
+    snap = {"docs": [{"path": "CONTRIBUTING.md", "url": "u", "sha": "aaa", "text": "x"}], "scanned_locations": []}
+    policy_review.record(world["cfg"], "acme/lib", snap, "read it")
+    monkeypatch.setattr(policy_review, "snapshot", lambda r: {"docs": [{"path": "CONTRIBUTING.md", "url": "u", "sha": "bbb", "text": "y"}]})
+    with pytest.raises(submit.Refused, match="changed since the review"):
+        run(world, execute=True)
+    assert writes(world["log"]) == []

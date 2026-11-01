@@ -62,8 +62,15 @@ the approval points below. Add `--json` before the command name for machine-read
 4. `ossforge patrol` shows what each open PR needs. Answer maintainers in the owner's voice only with the
    owner's approval of the wording.
 
-If `submit` stops because the repository has an AI/LLM policy document, show the owner the document's text and
-let the owner decide; the owner records approval by adding the repo to `ai_policy_reviewed`.
+Policy review comes before any submission. Run `ossforge policy-review owner/name`: it prints the repository's
+policy-bearing documents with their URLs and blob SHAs. It reads a fixed list of locations only, so also read the
+project's own contribution and AI-usage pages (a docs site, wiki or linked page can hold rules the scan cannot
+see). Show the owner what you found, with links and the restrictions that apply. Only after the owner has read it
+and said so, record the review: `ossforge policy-review owner/name --accept --note "restrictions: ..."`, or
+`--prohibited --note "..."` if the rules forbid the contribution (`submit` then refuses). The record pins the
+document SHAs; if a document changes, `submit` asks for a new review. No record, or an empty scan, means review
+needed, never "no policy". A recorded review is an acknowledgment, not permission to break a rule: a repository's
+explicit ban always wins and an anti-AI policy always blocks.
 
 ## 4. Refusals are answers
 

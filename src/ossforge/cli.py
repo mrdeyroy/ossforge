@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import acceptance, identity
+from . import acceptance, identity, policy_review
 from . import audit as audit_mod
 from . import comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -36,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     add("radar", "score a repo's health", "repo")
+    prv = add("policy-review", "show a repo's policy docs (URLs, SHAs) and optionally record YOUR review before submitting", "repo")
+    prv.add_argument("--accept", action="store_true", help="record that you read the docs and the repo's own pages")
+    prv.add_argument("--prohibited", action="store_true", help="record that the repo's rules forbid this contribution")
+    prv.add_argument("--note", default="", help="restrictions that apply, in your words")
     add("prepare", "set this work tree's own git author/committer to the configured identity (local config only)", "id")
     cm = add("commit", "identity-checked git commit in an item's clone", "id")
     cm.add_argument("-m", "--message", required=True)
@@ -127,6 +131,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"expected: {info['expected']}\neffective git: {info['effective_git']}")
             print("READY to publish" if info["ready_to_publish"] else "NOT READY: " + "; ".join(miss and [f"{m} not set" for m in miss] or login + wt))
         return 0 if info["ready_to_publish"] else 1
+    elif a.cmd == "policy-review":
+        snap = policy_review.snapshot(a.repo)
+        if a.accept or a.prohibited:
+            if not a.note.strip():
+                print("--note is required: state the restrictions that apply (or 'none found after reading X')")
+                return 2
+            rec = policy_review.record(cfg, a.repo, snap, a.note, prohibited=a.prohibited)
+            print("recorded:", json.dumps({k: v for k, v in rec.items() if k != "docs"}), f"{len(rec['docs'])} doc(s) pinned")
+        else:
+            print(f"{a.repo}: {len(snap['docs'])} policy-bearing doc(s) found in the scanned locations; anti-AI wording: {snap['anti_ai']}")
+            for d in snap["docs"]:
+                print(f"\n== {d['path']}  {d['url']}  blob {d['sha'][:10]}\n{d['text'][:1500]}")
+            print("\nThe scan reads fixed locations only. Also read the project's contribution/AI pages yourself.")
     elif a.cmd == "prepare":
         bad = identity.apply_local(cfg, q.items[a.id].clone)
         print("READY: this clone commits as the configured identity" if not bad else "NOT READY: " + "; ".join(bad))
