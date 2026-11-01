@@ -150,15 +150,18 @@ def _set_cooldown(wait: float) -> None:
         os.replace(tmp, _COOLDOWN_FILE)
 
 
-def pace_write() -> None:
-    """Call before every mutating request (issue, fork, push, PR, comment). Shared across processes."""
+def pace_write() -> float:
+    """Call before every mutating request (issue, fork, push, PR, comment). Shared across processes.
+
+    Returns the reservation timestamp recorded under the lock; consecutive reservations are >= WRITE_GAP_S apart."""
     with _shared_lock() as d:
         g = _load_gates(d)
         gap = WRITE_GAP_S - (time.time() - g.get("last_write", 0.0))
         if gap > 0:
             time.sleep(gap)
-        g["last_write"] = time.time()
+        g["last_write"] = reserved = time.time()
         _save_gates(d, g)
+    return reserved
 
 
 def configure(cache_dir: str | Path | None, ttl: int = 900) -> None:
