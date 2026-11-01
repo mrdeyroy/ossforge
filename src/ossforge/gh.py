@@ -230,6 +230,11 @@ def search_issues(q: str, per_page: int = 30, sort: str = "updated", fresh: bool
     return api("search/issues", fresh=fresh, q=q, per_page=per_page, sort=sort, order="desc")["items"]
 
 
+def search_page(q: str, per_page: int = 30, sort: str = "updated") -> dict:
+    """One search call returning both ``total_count`` and ``items`` (saves a separate count query)."""
+    return api("search/issues", q=q, per_page=per_page, sort=sort, order="desc")
+
+
 def search_count(q: str) -> int:
     return api("search/issues", q=q, per_page=1)["total_count"]
 

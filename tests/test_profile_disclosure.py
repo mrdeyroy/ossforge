@@ -58,3 +58,20 @@ def test_history_import_boosts_but_closed_never_penalises(tmp_path):
     assert s.repo_boost("c/d") == 0
     s.record_repo("c/d", "closed_unmerged")
     assert s.repo_boost("c/d") == 0
+
+
+def test_tally_skips_own_orgs():
+    items = [{"repository_url": "https://api.github.com/repos/MyOrg/x"},
+             {"repository_url": "https://api.github.com/repos/pallets/click"}]
+    assert profile.tally(items, "me", "merged", {"myorg"}) == {"pallets/click": 1}
+
+
+def test_member_orgs_are_unclassified_not_self_or_external(tmp_path, monkeypatch):
+    mk = lambda r: {"repository_url": f"https://api.github.com/repos/{r}"}  # noqa: E731
+    calls = iter([[mk("TeamOrg/a"), mk("OwnOrg/b"), mk("pallets/click")], []])
+    monkeypatch.setattr(profile.gh, "search_issues", lambda *a, **k: next(calls))
+    monkeypatch.setattr(profile.gh, "api", lambda path, **k: [{"login": "TeamOrg"}] if path == "user/orgs" else {"login": "me"})
+    s = Stats(tmp_path / "s.json")
+    r = profile.bootstrap(s, "me", ["OwnOrg"])
+    assert r["merged"] == {"pallets/click": 1} and r["unclassified"] == ["TeamOrg/a"]
+    assert s.repo_boost("TeamOrg/a") == 0 and s.repo_boost("OwnOrg/b") == 0

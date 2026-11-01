@@ -78,3 +78,11 @@ def test_effective_history_folds_state():
     recs = [{"event": "pr_opened", "repo": "o/r", "pr": 5, "state": "open"},
             {"event": "pr_state", "repo": "o/r", "pr": 5, "state": "merged"}]
     assert safety.effective_history(recs)[0]["state"] == "merged"
+
+
+def test_snippet_marks_the_finding_line(tmp_path):
+    from ossforge import hunt
+    (tmp_path / "m.py").write_text("\n".join(f"line{i}" for i in range(1, 21)))
+    out = hunt.snippet(tmp_path, "m.py", 10, radius=2)
+    assert out.splitlines()[2].startswith("   10>") and "line8" in out and "line12" in out and "line13" not in out
+    assert hunt.snippet(tmp_path, "missing.py", 3) == ""

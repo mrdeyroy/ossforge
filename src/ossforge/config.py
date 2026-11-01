@@ -30,6 +30,7 @@ class Config:
         default_factory=lambda: ["bounty", "airdrop", "giveaway", "eth)", "token", "rtc", "campaign", "reward pool"]
     )
     cache_ttl_seconds: int = 900
+    own_orgs: list[str] = field(default_factory=list)  # orgs whose repos are yours, ignored by `bootstrap`
     github_user: str = ""             # your login; empty = ask gh. Used by `bootstrap`
 
     @property
