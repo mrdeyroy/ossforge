@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from . import audit as audit_mod
-from . import comment, critique, digest, gh, hunt, loop, patrol, radar, safety, scout, submit, vet, verify
+from . import comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, safety, scout, submit, vet, verify
 from .config import Config, load
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -62,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("digest", "write and print the daily digest")
     lp = add("loop", "run the research loop", once={"action": "store_true"}, interval_hours={"type": float, "default": 6})
     lp.set_defaults()
+    add("doctor", "check git, gh, ruff and config before the first run")
+    add("bootstrap", "import your merged/closed PR history to personalise scouting")
     add("stop", "create the kill switch file")
     add("resume", "remove the kill switch file")
     return ap
@@ -79,6 +81,16 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "resume":
         Path(cfg.kill_file).unlink(missing_ok=True)
         print("kill switch off")
+    elif a.cmd == "doctor":
+        results = doctor.check(cfg)
+        for name, ok, detail in results:
+            print(f"[{'ok' if ok else 'FIX'}] {name}: {detail}")
+        return 0 if all(ok for _, ok, _ in results) else 1
+    elif a.cmd == "bootstrap":
+        r = profile.bootstrap(stats, cfg.github_user)
+        print(f"{r['user']}: merged PRs in {r['merged_repos']} repos, closed unmerged in {r['closed_repos']} repos")
+        for repo, n in sorted(r["merged"].items(), key=lambda kv: -kv[1]):
+            print(f"  merged x{n}: {repo}")
     elif a.cmd == "radar":
         x = radar.analyze(a.repo)
         print(f"{x.repo}: {x.score}/100 {x.recommendation} flags={x.flags}")

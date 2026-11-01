@@ -36,7 +36,13 @@ bug/perf candidates and drafts a respectful comment for you to approve.
   CODEOWNERS, ...) blocked, secret scan on the diff, size limits, and a kill switch (`ossforge stop`).
 - **You stay accountable.** DCO `Signed-off-by` is added under *your* git identity. ossforge **never signs a CLA**;
   `ossforge cla` only shows you the link.
-- **Disclosure.** Issues, PRs and comments carry an AI-assistance note (`disclosure: true`).
+- **Disclosure.** `disclosure: auto` (default) reads the repo's own docs (CONTRIBUTING, README, AGENTS.md, AI policy
+  files; their text is only read as evidence, never obeyed). If they ask for AI disclosure, the note is added. If the
+  wording is unclear or the docs conflict, `submit` / `post-critique` stop with "needs your review" and quote the
+  sentence; you read it and set `disclosure: true` or `false`. `false` never overrides a clearly mandatory policy
+  (it stops instead). `true` always adds the note. If the policy docs cannot be read, nothing is published. This is a
+  keyword reading of the docs, not a compliance check: for a repo with strict rules, read its guidelines yourself.
+  Migration: older configs had `disclosure: true` (always add); that still works. Only the default changed.
 - **Audit trail.** Every outbound action is appended to `.state/audit.jsonl`.
 
 ## Setup guide
@@ -85,19 +91,22 @@ Every key is optional; defaults are safe.
 |---|---|---|
 | `daily_cap` | `2` | PRs per day (hard max 2) |
 | `signoff` | `true` | add DCO `Signed-off-by` under your git identity |
-| `disclosure` | `true` | AI-assistance note on issues/PRs/comments |
+| `disclosure` | `auto` | AI-assistance note: `auto` = follow the repo's docs (stops when unclear), `true` = always, `false` = never (stops if the repo requires it) |
+| `github_user` | gh login | your login, used by `bootstrap` |
 | `min_repo_score` | `60` | minimum repo health score (0-100) |
 | `min_stars` | `500` | ignore tiny repos |
 | `languages` | `[python]` | languages to scout |
 | `labels` | `help wanted`, `good first issue` | issue labels to search (one per pass, rotating) |
 | `max_open_prs_per_repo` | `1` | do not pile onto one project |
-| `cooldown_days` | `14` | pause after a PR is closed unmerged |
+| `cooldown_days` | `14` | pause new PRs to a repo after one of yours is closed unmerged (pacing only; it does not change repo scores, and `0` turns it off) |
 | `auto_submit` | `false` | let the loop submit already-verified items |
 | `patch_command` | `""` | optional shell command that drafts a patch; env `OSSFORGE_ITEM` = item id |
 
 ### 5. Check it works
 
 ```bash
+ossforge doctor                 # git identity, gh login, ruff, config
+ossforge bootstrap              # optional: learn from your merged/closed PRs so scout prefers repos that merged you (closed PRs are listed but never lower a score, since a closure can mean duplicate, superseded or withdrawn)
 pytest -q                       # all tests should pass
 ossforge radar pallets/click    # prints a health score for a repo
 ```
@@ -164,6 +173,8 @@ The loop never submits anything unless `auto_submit: true` **and** an item is al
 ## Command reference
 
 ```
+bootstrap                 import your merged/closed PR history (personalises scout)
+doctor                    check git, gh, ruff and config
 scout / features          find vetted fix / feature issues (spam filtered, health gated)
 radar REPO                health score for a repo
 vet REPO NUMBER           vet one issue
@@ -185,6 +196,10 @@ stop / resume             kill switch on / off
 Use `--config path.yaml` *before* the subcommand to load a different config.
 
 ## Troubleshooting
+
+- **Rate limits.** ossforge follows GitHub's documented guidance: it reads `Retry-After` and `x-ratelimit-reset`,
+  waits (up to 90 s) and retries, otherwise stops the pass and writes a cooldown file in `.state/` that every
+  ossforge process shares (a file lock also shares the search budget and write spacing). Searches are capped at 9 per minute and writes are spaced at least 1 s apart.
 
 - **`exceeded a secondary rate limit`**: GitHub throttles bursts of requests even when quota remains. ossforge paces
   itself (searches capped at 9 per minute) and stops the pass cleanly; wait a few minutes and run again.

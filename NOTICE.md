@@ -10,3 +10,5 @@ ossforge is an independent implementation that builds on ideas from:
   contribution, protected paths, evidence log, PR patrol). No ContribAI source code is included.
 
 Thanks to their authors.
+
+The MIT license texts for GitSense and oss-scout are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
