@@ -98,7 +98,7 @@ Every key is optional; defaults are safe.
 | `languages` | `[python]` | languages to scout |
 | `labels` | `help wanted`, `good first issue` | issue labels to search (one per pass, rotating) |
 | `max_open_prs_per_repo` | `1` | do not pile onto one project |
-| `cooldown_days` | `14` | pause after a PR is closed unmerged |
+| `cooldown_days` | `14` | pause new PRs to a repo after one of yours is closed unmerged (pacing only; it does not change repo scores, and `0` turns it off) |
 | `auto_submit` | `false` | let the loop submit already-verified items |
 | `patch_command` | `""` | optional shell command that drafts a patch; env `OSSFORGE_ITEM` = item id |
 
