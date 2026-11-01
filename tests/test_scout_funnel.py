@@ -46,3 +46,11 @@ def test_kept_counts(monkeypatch, tmp_path):
     out = scout.scout(_cfg(tmp_path))
     assert len(out) == 1 and scout.LAST_FUNNEL["approved"] == 1
     assert scout.explain_funnel(scout.LAST_FUNNEL).startswith("1 of 1")
+
+
+def test_unknown_queue_id_is_a_clean_error(tmp_path, capsys):
+    from ossforge import cli
+    cfgf = tmp_path / "c.yaml"
+    cfgf.write_text(f"kill_file: {tmp_path}/STOP\nstate_dir: {tmp_path}/.state\n")
+    rc = cli.main(["--config", str(cfgf), "submit", "nope"])
+    assert rc == 2 and "unknown queue id" in capsys.readouterr().err

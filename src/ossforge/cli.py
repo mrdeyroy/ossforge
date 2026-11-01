@@ -74,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
     cfg = load(a.config)
     q, audit, stats, limiter = _ctx(cfg)
+    if getattr(a, "id", None) is not None and a.id not in q.items:
+        print(f"unknown queue id {a.id!r}. Run `queue` to list ids.", file=sys.stderr)
+        return 2
 
     if a.cmd == "stop":
         Path(cfg.kill_file).parent.mkdir(parents=True, exist_ok=True)
