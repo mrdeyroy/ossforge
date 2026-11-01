@@ -14,7 +14,7 @@ HARD_DAILY_MAX = 2  # not configurable above this
 class Config:
     daily_cap: int = 2
     signoff: bool = True              # DCO trailer under the operator's own git identity
-    disclosure: bool = True           # AI-assistance note in issue/PR bodies
+    disclosure: bool | str = "auto"   # true | false | "auto": add the AI-assistance note only where the repo asks for it
     min_repo_score: int = 60
     min_stars: int = 500
     languages: list[str] = field(default_factory=lambda: ["python"])
@@ -30,6 +30,7 @@ class Config:
         default_factory=lambda: ["bounty", "airdrop", "giveaway", "eth)", "token", "rtc", "campaign", "reward pool"]
     )
     cache_ttl_seconds: int = 900
+    github_user: str = ""             # your login; empty = ask gh. Used by `bootstrap`
 
     @property
     def cap(self) -> int:

@@ -35,7 +35,7 @@ def run_once(cfg: Config) -> list[str]:
     try:
         _pass(cfg, q, audit, stats, limiter, notes)
     except gh.RateLimited as e:
-        notes.append(f"stopped early: GitHub rate limit ({str(e)[:80]}). Progress is saved; the next pass continues.")
+        notes.append(f"stopped early: GitHub rate limit ({str(e)[:80]}). Progress is saved; the next pass continues after the cooldown.")
     digest.write(cfg.path("digest.md"), digest.render(q, audit, [], notes))
     return notes
 

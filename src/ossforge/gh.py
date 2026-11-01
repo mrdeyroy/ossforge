@@ -7,24 +7,26 @@ Adds a disk TTL cache for GETs and a sliding-window budget for the search API
 from __future__ import annotations
 
 import base64
+import contextlib
+import fcntl
 import hashlib
 import json
+import os
 import subprocess
 import time
-from collections import deque
 from pathlib import Path
 from typing import Any
 
 _CACHE_DIR: Path | None = None
 _TTL = 900
-_SEARCH_TIMES: deque[float] = deque()
 SEARCH_PER_MIN = 9  # well under GitHub's secondary limit; bursts of searches look like scraping
 
 
 class GhError(RuntimeError):
-    def __init__(self, msg: str, status: int | None = None):
+    def __init__(self, msg: str, status: int | None = None, retry_after: float = 0.0):
         super().__init__(msg)
         self.status = status
+        self.retry_after = retry_after
 
 
 class RateLimited(GhError):
@@ -34,21 +36,152 @@ class RateLimited(GhError):
 PACING_S = 0.4  # gap after every uncached call; keeps bursts under the secondary limit
 
 
+MAX_RETRIES = 2          # in-call retries after a rate-limit response
+MAX_INLINE_WAIT = 90.0   # longer waits stop the pass instead of sleeping
+MIN_SECONDARY_WAIT = 60.0  # GitHub: with no Retry-After on a secondary limit, wait at least a minute
+WRITE_GAP_S = 1.0        # GitHub asks for >= 1s between mutating requests
+_COOLDOWN_FILE: Path | None = None
+
+
+def split_response(out: str) -> tuple[dict[str, str], str]:
+    """Split `gh api -i` output into lower-cased headers (plus ``status``) and body."""
+    if not out.startswith("HTTP/"):
+        return {}, out
+    head, _, body = out.replace("\r\n", "\n").partition("\n\n")
+    lines = head.split("\n")
+    h = {"status": (lines[0].split() + ["", ""])[1]}
+    for ln in lines[1:]:
+        k, _, v = ln.partition(":")
+        h[k.strip().lower()] = v.strip()
+    return h, body
+
+
+def status_of(headers: dict[str, str], err: str) -> int | None:
+    if headers.get("status", "").isdigit():
+        return int(headers["status"])
+    for code in (429, 403, 404):
+        if str(code) in err:
+            return code
+    return None
+
+
+def is_rate_limited(status: int | None, headers: dict[str, str], err: str) -> bool:
+    low = err.lower()
+    if status == 429:
+        return True
+    if status == 403 and (headers.get("retry-after") or headers.get("x-ratelimit-remaining") == "0"):
+        return True
+    return "rate limit" in low or "abuse detection" in low
+
+
+def retry_wait(headers: dict[str, str], attempt: int = 0, now: float | None = None) -> float:
+    """Seconds to wait, following GitHub's documented rules: Retry-After first, then the
+    reset time when the quota is exhausted, else at least a minute with exponential backoff."""
+    ra = headers.get("retry-after", "")
+    if ra.isdigit():
+        return float(ra) + 1
+    if headers.get("x-ratelimit-remaining") == "0" and headers.get("x-ratelimit-reset", "").isdigit():
+        return max(1.0, float(headers["x-ratelimit-reset"]) - (now or time.time())) + 1
+    return MIN_SECONDARY_WAIT * (2 ** attempt)
+
+
+def _state_dir() -> Path | None:
+    return _COOLDOWN_FILE.parent if _COOLDOWN_FILE else None
+
+
+@contextlib.contextmanager
+def _shared_lock():
+    """Cross-process lock so several ossforge runs share one budget. No state dir = in-process only."""
+    d = _state_dir()
+    if d is None:
+        yield None
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    with (d / "ratelimit.lock").open("a+") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield d
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _load_gates(d: Path | None) -> dict:
+    if d is None:
+        return _MEM_GATES
+    try:
+        return json.loads((d / "gates.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_gates(d: Path | None, g: dict) -> None:
+    if d is None:
+        return
+    tmp = d / f"gates.json.{os.getpid()}.tmp"
+    tmp.write_text(json.dumps(g))
+    os.replace(tmp, d / "gates.json")
+
+
+_MEM_GATES: dict = {}
+
+
+def _guard_cooldown() -> None:
+    if not _COOLDOWN_FILE or not _COOLDOWN_FILE.exists():
+        return
+    try:
+        until = float(_COOLDOWN_FILE.read_text())
+    except (OSError, ValueError):
+        until = time.time() + MIN_SECONDARY_WAIT  # unreadable marker: fail closed for a minute
+    if until > time.time():
+        raise RateLimited(f"rate-limit cooldown active, ~{int(until - time.time())}s left", 429, until - time.time())
+
+
+def _set_cooldown(wait: float) -> None:
+    if not _COOLDOWN_FILE:
+        return
+    with _shared_lock():
+        until = time.time() + wait
+        try:  # never shorten a cooldown another process already set
+            until = max(until, float(_COOLDOWN_FILE.read_text()))
+        except (OSError, ValueError):
+            pass
+        tmp = _COOLDOWN_FILE.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(str(until))
+        os.replace(tmp, _COOLDOWN_FILE)
+
+
+def pace_write() -> None:
+    """Call before every mutating request (issue, fork, push, PR, comment). Shared across processes."""
+    with _shared_lock() as d:
+        g = _load_gates(d)
+        gap = WRITE_GAP_S - (time.time() - g.get("last_write", 0.0))
+        if gap > 0:
+            time.sleep(gap)
+        g["last_write"] = time.time()
+        _save_gates(d, g)
+
+
 def configure(cache_dir: str | Path | None, ttl: int = 900) -> None:
-    global _CACHE_DIR, _TTL
+    global _CACHE_DIR, _TTL, _COOLDOWN_FILE
     _CACHE_DIR = Path(cache_dir) if cache_dir else None
+    _COOLDOWN_FILE = _CACHE_DIR.parent / "ratelimit_until" if _CACHE_DIR else None
     _TTL = ttl
 
 
 def _budget(path: str) -> None:
     if not path.startswith("search/"):
         return
-    now = time.time()
-    while _SEARCH_TIMES and now - _SEARCH_TIMES[0] > 60:
-        _SEARCH_TIMES.popleft()
-    if len(_SEARCH_TIMES) >= SEARCH_PER_MIN:
-        time.sleep(max(0.0, 60 - (now - _SEARCH_TIMES[0])) + 0.2)
-    _SEARCH_TIMES.append(time.time())
+    with _shared_lock() as d:
+        g = _load_gates(d)
+        now = time.time()
+        times = [t for t in g.get("search", []) if now - t <= 60]
+        if len(times) >= SEARCH_PER_MIN:
+            time.sleep(max(0.0, 60 - (now - times[0])) + 0.2)
+            now = time.time()
+            times = [t for t in times if now - t <= 60]
+        times.append(time.time())
+        g["search"] = times
+        _save_gates(d, g)
 
 
 def _cache_path(path: str, params: dict) -> Path | None:
@@ -65,19 +198,28 @@ def api(path: str, /, *, fresh: bool = False, **params: Any) -> Any:
             return json.loads(cp.read_text(encoding="utf-8"))
         except ValueError:
             pass
-    _budget(path)
-    cmd = ["gh", "api", "-X", "GET", path]
+    _guard_cooldown()
+    cmd = ["gh", "api", "-i", "-X", "GET", path]
     for k, v in params.items():
         cmd += ["-f", f"{k}={v}"]
-    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    time.sleep(PACING_S)
-    if p.returncode != 0:
-        err = p.stderr.strip()
-        status = 404 if "404" in err else 403 if "403" in err else None
-        if "rate limit" in err.lower():
-            raise RateLimited(err, status)
+    for attempt in range(MAX_RETRIES + 1):
+        _budget(path)
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        time.sleep(PACING_S)
+        headers, body = split_response(p.stdout)
+        if p.returncode == 0:
+            data = json.loads(body) if body.strip() else None
+            break
+        err = (p.stderr.strip() + "\n" + body[:300]).strip()
+        status = status_of(headers, err)
+        if is_rate_limited(status, headers, err):
+            wait = retry_wait(headers, attempt)
+            if attempt < MAX_RETRIES and wait <= MAX_INLINE_WAIT:
+                time.sleep(wait)  # documented behaviour: honour Retry-After / reset, then try again
+                continue
+            _set_cooldown(wait)
+            raise RateLimited(f"{err.splitlines()[0] if err else 'rate limited'} (retry in ~{int(wait)}s)", status, wait)
         raise GhError(err or "gh api failed", status)
-    data = json.loads(p.stdout) if p.stdout.strip() else None
     if cp and data is not None:
         cp.parent.mkdir(parents=True, exist_ok=True)
         cp.write_text(json.dumps(data), encoding="utf-8")

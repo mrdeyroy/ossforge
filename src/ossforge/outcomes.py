@@ -47,12 +47,21 @@ class Stats:
         elif outcome == "closed_unmerged":
             r["closed"] += 1
 
+    def set_history(self, repo: str, merged: int, closed_imported: int) -> None:
+        """Idempotent import of your GitHub history. Closed-unmerged is stored for display only:
+        a closure can mean duplicate, superseded or withdrawn, so it never lowers a repo's score.
+        Outcomes ossforge itself recorded (`closed`) are left untouched."""
+        r = self.d["repos"].setdefault(repo, {"merged": 0, "closed": 0})
+        r["merged_imported"] = merged
+        r["closed_imported"] = closed_imported
+
     def repo_boost(self, repo: str) -> int:
         """Repos that merged us before are worth more (oss-scout 'merged' strategy)."""
         r = self.d["repos"].get(repo)
         if not r:
             return 0
-        return min(20, 10 * r["merged"]) - min(30, 15 * r["closed"])
+        merged = max(r.get("merged", 0), r.get("merged_imported", 0))  # same PRs can appear in both: no double count
+        return min(20, 10 * merged) - min(30, 15 * r.get("closed", 0))
 
 
 def rank(findings: list[Finding], stats: Stats) -> list[tuple[float, Finding]]:

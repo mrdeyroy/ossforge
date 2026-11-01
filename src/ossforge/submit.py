@@ -24,6 +24,8 @@ class Refused(Exception):
 
 
 def _run(cmd: list[str], cwd: str | None = None) -> str:
+    if cmd[0] == "gh" and cmd[1:3] in (["issue", "create"], ["pr", "create"], ["pr", "comment"], ["repo", "fork"]):
+        gh.pace_write()
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8")
     if p.returncode:
         raise Refused(f"{' '.join(cmd[:3])}...: {p.stderr.strip()}")
@@ -39,6 +41,14 @@ def _ensure_signoff(cwd: str) -> None:
     unsigned = _run(["git", "rev-list", "--grep=^Signed-off-by:", "--invert-grep", f"{base}..HEAD"], cwd)
     if unsigned:
         _run(["git", "rebase", "--signoff", base], cwd)
+
+
+def _policy_files(repo: str) -> dict[str, str]:
+    """Fail closed: if the repo's policy docs cannot be read, nothing is published."""
+    try:
+        return vet.policy_texts(repo)
+    except gh.GhError as e:
+        raise Refused(f"could not read {repo} policy docs ({e}); not publishing") from e
 
 
 def cla_status(repo: str, pr: int) -> str:
@@ -63,7 +73,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     why = safety.repo_allowed(cfg, it.repo, history)
     if why and not it.submitted.get("issue_url"):
         raise Refused(why)
-    files = vet.policy_texts(it.repo)
+    files = _policy_files(it.repo)
     pol = policy.scan_files(files)
     if pol.anti_ai:
         raise Refused(f"anti-AI policy in {pol.source}")
@@ -101,7 +111,7 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
         return {"dry_run": True, **plan}
 
     prog = dict(it.submitted)
-    note = DISCLOSURE if cfg.disclosure else ""
+    note = DISCLOSURE if policy.want_disclosure(cfg.disclosure, _policy_files(it.repo)) else ""
     me = gh.api("user", fresh=True)["login"]
     cwd = str(Path(it.clone))
 
@@ -117,6 +127,7 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
     num = prog["issue_url"].rsplit("/", 1)[-1]
 
     if not prog.get("fork_pushed"):
+        gh.pace_write()
         subprocess.run(["gh", "repo", "fork", it.repo, "--clone=false"], capture_output=True)
         fork = f"https://github.com/{me}/{it.repo.split('/')[1]}.git"
         have = subprocess.run(["git", "remote"], cwd=cwd, capture_output=True, text=True).stdout.split()

@@ -9,6 +9,7 @@ Keyword table adapted from oss-scout's anti-llm-policy (MIT).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 ANTI_AI_KEYWORDS: tuple[str, ...] = (
@@ -56,3 +57,45 @@ def scan_files(files: dict[str, str]) -> PolicyResult:
             if r.anti_ai:
                 return r
     return PolicyResult(False)
+
+
+# Only contributor-facing policy documents can make disclosure mandatory. README and AGENTS.md
+# are not treated as authority: AGENTS.md is written for tools, README for anyone.
+DISCLOSURE_FILES: tuple[str, ...] = (
+    "CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md",
+    "AI_POLICY.md", ".github/AI_POLICY.md",
+)
+
+_AI = re.compile(r"(?:\bai\b|\bllms?\b|copilot|chatgpt|claude|gemini|generative|machine[- ]generated)", re.I)
+_VERB = re.compile(r"(?:disclos\w*|declare|indicate|acknowledge|mention|state|label)", re.I)
+_ASK = re.compile(r"(?:\bmust\b|\bshould\b|\brequired?\b|\bplease\b|need to|\bask\b|expected|mandatory|\balways\b)", re.I)
+_NEG = re.compile(r"(?:no need|not required|not necessary|optional|don'?t need|do not need|need not)", re.I)
+
+
+def requires_disclosure(text: str) -> bool:
+    """True when one sentence of the text asks contributors to disclose AI use (and does not waive it).
+
+    Heuristic on purpose: it only decides whether to add a short note. Anti-AI bans are handled by scan_text.
+    """
+    for sent in re.split(r"[.!?\n]+", text or ""):
+        if _AI.search(sent) and _VERB.search(sent) and _ASK.search(sent) and not _NEG.search(sent):
+            return True
+    return False
+
+
+def disclosure_required(files: dict[str, str]) -> str | None:
+    """Return the first authoritative policy file that asks for AI-use disclosure, or None."""
+    for path in DISCLOSURE_FILES:
+        if path in files and requires_disclosure(files[path]):
+            return path
+    return None
+
+
+def want_disclosure(setting, files: dict[str, str]) -> bool:
+    """``setting`` is True (always), False (never) or "auto" (only when the repo's docs ask for it)."""
+    if isinstance(setting, str):
+        v = setting.strip().lower()
+        if v == "auto":
+            return disclosure_required(files) is not None
+        return v in ("true", "yes", "always", "on")
+    return bool(setting)

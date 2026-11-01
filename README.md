@@ -36,7 +36,9 @@ bug/perf candidates and drafts a respectful comment for you to approve.
   CODEOWNERS, ...) blocked, secret scan on the diff, size limits, and a kill switch (`ossforge stop`).
 - **You stay accountable.** DCO `Signed-off-by` is added under *your* git identity. ossforge **never signs a CLA**;
   `ossforge cla` only shows you the link.
-- **Disclosure.** Issues, PRs and comments carry an AI-assistance note (`disclosure: true`).
+- **Disclosure.** `disclosure: auto` (default) adds an AI-assistance note only when the repo's contributor docs ask
+  for AI use to be disclosed in CONTRIBUTING / AI_POLICY files (README and AGENTS.md do not count). Set `true` to
+  always add it or `false` to never add it. If the repo's policy docs cannot be read, nothing is published.
 - **Audit trail.** Every outbound action is appended to `.state/audit.jsonl`.
 
 ## Setup guide
@@ -85,7 +87,8 @@ Every key is optional; defaults are safe.
 |---|---|---|
 | `daily_cap` | `2` | PRs per day (hard max 2) |
 | `signoff` | `true` | add DCO `Signed-off-by` under your git identity |
-| `disclosure` | `true` | AI-assistance note on issues/PRs/comments |
+| `disclosure` | `auto` | AI-assistance note: `auto` = only where the repo asks, or `true` / `false` |
+| `github_user` | gh login | your login, used by `bootstrap` |
 | `min_repo_score` | `60` | minimum repo health score (0-100) |
 | `min_stars` | `500` | ignore tiny repos |
 | `languages` | `[python]` | languages to scout |
@@ -98,6 +101,8 @@ Every key is optional; defaults are safe.
 ### 5. Check it works
 
 ```bash
+ossforge doctor                 # git identity, gh login, ruff, config
+ossforge bootstrap              # optional: learn from your merged/closed PRs so scout prefers repos that merged you (closed PRs are listed but never lower a score)
 pytest -q                       # all tests should pass
 ossforge radar pallets/click    # prints a health score for a repo
 ```
@@ -164,6 +169,8 @@ The loop never submits anything unless `auto_submit: true` **and** an item is al
 ## Command reference
 
 ```
+bootstrap                 import your merged/closed PR history (personalises scout)
+doctor                    check git, gh, ruff and config
 scout / features          find vetted fix / feature issues (spam filtered, health gated)
 radar REPO                health score for a repo
 vet REPO NUMBER           vet one issue
@@ -185,6 +192,10 @@ stop / resume             kill switch on / off
 Use `--config path.yaml` *before* the subcommand to load a different config.
 
 ## Troubleshooting
+
+- **Rate limits.** ossforge follows GitHub's documented guidance: it reads `Retry-After` and `x-ratelimit-reset`,
+  waits (up to 90 s) and retries, otherwise stops the pass and writes a cooldown file in `.state/` that every
+  ossforge process shares (a file lock also shares the search budget and write spacing). Searches are capped at 9 per minute and writes are spaced at least 1 s apart.
 
 - **`exceeded a secondary rate limit`**: GitHub throttles bursts of requests even when quota remains. ossforge paces
   itself (searches capped at 9 per minute) and stops the pass cleanly; wait a few minutes and run again.

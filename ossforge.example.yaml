@@ -1,7 +1,8 @@
 # Copy to ossforge.yaml. Every key is optional.
 daily_cap: 2              # hard maximum is 2 regardless of this value
 signoff: true             # add DCO Signed-off-by under YOUR git identity (your attestation)
-disclosure: true          # AI-assistance note on issues/PRs/comments
+disclosure: auto          # auto = add the AI-assistance note only where the repo asks for it; true / false to force
+github_user: ""           # optional; used by `ossforge bootstrap` (default: the gh login)
 min_repo_score: 60
 min_stars: 500
 languages: [python]
