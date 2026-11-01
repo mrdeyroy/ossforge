@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from . import audit as audit_mod
-from . import dedupe, external, policy
+from . import dedupe, external, identity, policy
 from .config import Config
 from .outcomes import Stats, rank
 from .queue import Item, Queue, item_id
@@ -19,6 +19,7 @@ def clone(cfg: Config, repo: str) -> Path:
     if not dest.exists():
         subprocess.run(["git", "clone", "--depth", "50", f"https://github.com/{repo}", str(dest)],
                        check=True, capture_output=True)
+        identity.apply_local(cfg, str(dest))  # fresh clones commit as the owner from the start (local config only)
     return dest
 
 

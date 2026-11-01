@@ -204,3 +204,13 @@ def test_repo_that_asks_for_dco_is_refused_until_approved(world, monkeypatch):
     with pytest.raises(submit.Refused, match="asks for a DCO"):
         run(world, execute=True)
     assert writes(world["log"]) == []
+
+
+def test_repo_with_ai_policy_doc_stops_until_owner_reviews(world, monkeypatch):
+    from ossforge import vet
+    monkeypatch.setattr(vet, "policy_texts", lambda repo: {".github/AI_POLICY.md": "# Generative AI / LLM Policy\nBe responsible."})
+    with pytest.raises(submit.Refused, match="has an AI/LLM policy"):
+        run(world, execute=True)
+    assert writes(world["log"]) == []
+    world["cfg"].ai_policy_reviewed = ["acme/lib"]
+    assert run(world)["dry_run"]
