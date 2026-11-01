@@ -86,7 +86,7 @@ def explain_funnel(f: dict) -> str:
     if not f.get("fetched"):
         return "NO MATCHES: the search returned no issues for this query (try another label/language or lower min_stars)."
     if not f.get("kept"):
-        dropped = {k: f[k] for k in ("spam", "unclear", "skipped", "radar_failed") if f.get(k)}
+        dropped = {k: f[k] for k in ("spam", "unclear", "skipped", "below_min_stars", "repo_metadata_failed", "radar_failed") if f.get(k)}
         return f"ALL FILTERED: {f['fetched']} issues found, none usable; dropped by stage: {dropped or 'n/a'}."
     return f"{f['kept']} of {f['fetched']} issues kept ({f['approved']} approved)."
 
@@ -102,8 +102,9 @@ def scout(
 ) -> list[Candidate]:
     f = LAST_FUNNEL
     f.clear()
-    f.update(fetched=0, spam=0, unclear=0, skipped=0, radar_failed=0, kept=0, approved=0, stopped="")
+    f.update(fetched=0, spam=0, unclear=0, skipped=0, radar_failed=0, repo_metadata_failed=0, below_min_stars=0, kept=0, approved=0, stopped="")
     scores: dict[str, radar.RepoScore] = {}
+    repo_stars: dict[str, int] = {}
     out: list[Candidate] = []
     try:
         items = gh.search_issues(build_query(language, label, cfg.min_stars), per_page=limit)
@@ -124,6 +125,19 @@ def scout(
             f["skipped"] += 1
             continue
         try:
+            # Issue search does not reliably enforce repository-only qualifiers.
+            # Check the owning repository, once per repo, before expensive vetting.
+            if repo not in repo_stars:
+                try:
+                    repo_stars[repo] = gh.api(f"repos/{repo}")["stargazers_count"]
+                except gh.RateLimited:
+                    raise
+                except (gh.GhError, KeyError):
+                    f["repo_metadata_failed"] += 1
+                    continue
+            if repo_stars[repo] < cfg.min_stars:
+                f["below_min_stars"] += 1
+                continue
             if repo not in scores:
                 try:
                     scores[repo] = radar.analyze(repo)
