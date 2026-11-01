@@ -55,7 +55,10 @@ def test_write_pacing_is_shared_across_processes(tmp_path):
     times = sorted(t for _ in ps for t in q.get(timeout=30))
     [p.join() for p in ps]
     gaps = [b - a for a, b in zip(times, times[1:])]
-    assert len(times) == 9 and min(gaps) >= gh.WRITE_GAP_S - 0.05
+    # timestamps are taken by each worker after pace_write returns, so scheduler jitter between two workers
+    # can shave a few hundred ms off the observed gap; the lock-protected spacing itself is >= 1s
+    assert len(times) == 9 and min(gaps) >= gh.WRITE_GAP_S - 0.3
+    assert times[-1] - times[0] >= 8 * gh.WRITE_GAP_S - 0.3  # nine writes cannot finish faster than eight gaps
 
 
 def test_corrupt_cooldown_marker_fails_closed(tmp_path):
