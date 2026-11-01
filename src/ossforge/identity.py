@@ -17,6 +17,10 @@ from .config import Config
 _IDENT = re.compile(r"^(?P<name>.*) <(?P<email>[^>]*)> ")
 
 
+ARTIFACTS = ("**/*.egg-info/**", "**/__pycache__/**", "**/.venv/**", "**/node_modules/**", "build/**", "dist/**",
+             "**/*.pyc", ".pytest_cache/**", ".ruff_cache/**")
+
+
 class IdentityError(Exception):
     pass
 
@@ -106,3 +110,27 @@ def require(problems: list[str]) -> None:
     if problems:
         raise IdentityError("identity check failed: " + "; ".join(problems) +
                             ". Fix ossforge.yaml or the work tree's git identity, then retry. Nothing was published.")
+
+
+def apply_local(cfg: Config, cwd: str) -> list[str]:
+    """Set the expected author/committer in THIS work tree's own git config (never global). Refuses if the
+    gh login is wrong or settings are missing. Returns problems; empty means the tree now commits as the owner."""
+    problems = [f"{k} is not set in ossforge.yaml" for k in missing_settings(cfg)] or check_login(cfg)
+    if problems:
+        return problems
+    for key, val in (("user.name", cfg.git_name.strip()), ("user.email", cfg.git_email.strip())):
+        subprocess.run(["git", "config", "--local", key, val], cwd=cwd, check=True)
+    return check_worktree(cfg, cwd)  # env overrides (GIT_*) can still win; that is reported, not hidden
+
+
+def commit(cfg: Config, cwd: str, message: str, paths: list[str] | None = None) -> str:
+    """Identity gate, then one commit. The only commit path the docs tell an assistant to use."""
+    require(check_login(cfg) + check_worktree(cfg, cwd))
+    # stage what the assistant changed, never build/venv artifacts a package install leaves in the tree
+    spec = list(paths) if paths else [".", *(f":(exclude,glob){a}" for a in ARTIFACTS)]
+    subprocess.run(["git", "add", "-A", "--", *spec], cwd=cwd, check=True)
+    p = subprocess.run(["git", "commit", "-q", "-m", message], cwd=cwd, capture_output=True, text=True)
+    if p.returncode:
+        raise IdentityError(p.stderr.strip() or p.stdout.strip() or "git commit failed")
+    require(check_worktree(cfg, cwd, f"{_git(cwd, 'rev-parse', 'HEAD')}~1"))  # verify what was actually written
+    return _git(cwd, "rev-parse", "--short", "HEAD")

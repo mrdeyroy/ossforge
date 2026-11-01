@@ -7,6 +7,8 @@ or fixed the problem, and only then helps you file an **issue and a pull request
 contributors who want to send maintainers *fewer, better* contributions, not more noise.
 
 
+**Identity setup per work tree (no global change):** put `github_user`, `git_name`, `git_email` in `ossforge.yaml`, run `ossforge prepare ID` (sets the clone's own git config), then `ossforge whoami --dir <clone>`. Commit with `ossforge commit ID -m ...`.
+
 **Driving it from an AI IDE:** see [AGENTS.md](AGENTS.md). Most commands accept `--json` (before the command name).
 
 ## How it works

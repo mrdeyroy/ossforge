@@ -15,13 +15,13 @@ def test_outside_merges_count_and_bots_do_not():
     prs = [_pr(1, "dependabot[bot]", "NONE", 1, bot=True), _pr(2, "alice", "CONTRIBUTOR", 1, 10), _pr(3, "bob", "NONE", 1, 20),
            _pr(4, "maint", "MEMBER", 1, 3)]
     a = ac.summarize("o/r", prs, NOW, merged_by=lambda p: "maint")
-    assert a.status == "accepting" and {m["author"] for m in a.external_merged} == {"alice", "bob"}
+    assert a.status == "outside-merges-seen" and {m["author"] for m in a.external_merged} == {"alice", "bob"}
 
 
 def test_author_merging_own_pr_is_not_acceptance():
     prs = [_pr(2, "alice", "CONTRIBUTOR", 1, 10)]
     a = ac.summarize("o/r", prs, NOW, merged_by=lambda p: "alice")
-    assert a.status != "accepting" and any("own author" in r for r in a.reasons)
+    assert a.status != "outside-merges-seen" and any("own author" in r for r in a.reasons)
 
 
 def test_old_outside_merge_is_not_current_evidence():
@@ -38,13 +38,13 @@ def test_thin_data_is_unknown_not_negative():
 def test_enough_human_prs_and_no_outside_merge_is_none():
     prs = [_pr(i, "maint", "MEMBER", 1, 3) for i in range(12)] + [_pr(99, "eve", "NONE", None, 8)]
     a = ac.summarize("o/r", prs, NOW)
-    assert a.status == "none" and a.external_closed_unmerged == 1
+    assert a.status == "none-observed" and a.external_closed_unmerged == 1
 
 
 def test_full_sample_covering_weeks_with_no_outside_merge_is_none():
     prs = [_pr(i, "maint", "MEMBER", 1, 3 + i) for i in range(30)] + [_pr(100 + i, "x", "NONE", None, 5 + i) for i in range(10)]
     a = ac.summarize("o/r", prs, NOW)
-    assert a.status == "none" and a.covered_days >= 30 and a.external_closed_unmerged == 10
+    assert a.status == "none-observed" and a.covered_days >= 30 and a.external_closed_unmerged == 10
 
 
 def test_full_sample_covering_days_only_is_unknown():

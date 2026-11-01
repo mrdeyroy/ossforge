@@ -23,7 +23,7 @@ class Candidate:
     repo_score: int
     verdict: vet.Verdict
     kind: str = "fix"  # fix | feature
-    acceptance: str = "not checked"  # accepting | none | unknown | not checked
+    acceptance: str = "not checked"  # outside-merges-seen | none-observed | unknown | not checked
     score: float = 0.0
     why: list[str] = field(default_factory=list)
 
@@ -138,14 +138,16 @@ def scout(
             acc = None
             if v.decision == "approve":  # spend the extra calls only on candidates that already passed
                 acc = acceptance.evidence(repo)
-                if acc.status == "none":
-                    v = vet.Verdict(v.issue, "skip", v.reasons + ["no outside-contributor PR merged recently: " + acc.reasons[0]])
+                if acc.status == "none-observed":  # shown, never a filter: the sample is finite and biased
+                    v = vet.Verdict(v.issue, v.decision, v.reasons + ["caution: " + acc.reasons[0]])
         except gh.RateLimited as e:
             f["stopped"] = f"GitHub rate limit while vetting {repo} ({e}); {len(items) - f['kept']} issues not examined"
             break
         sc, why = score_issue(it, rs.score + boost)
         if acc:
-            why = why + [f"outside PRs: {acc.status} ({acc.reasons[0] if acc.reasons else ''})"]
+            why = why + [f"outside PRs: {acc.status}, freshness {acc.freshness}, sampled {acc.sampled_prs} ({acc.reasons[0] if acc.reasons else ''})"]
+            if acc.status == "none-observed":
+                sc = max(0.0, sc - 10)
         out.append(Candidate(repo, it["number"], it["title"], it["html_url"], rs.score + boost, v, kind, score=sc, why=why,
                              acceptance=acc.status if acc else "not checked"))
         f["kept"] += 1

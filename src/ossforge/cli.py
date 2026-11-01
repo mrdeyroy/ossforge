@@ -36,8 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     add("radar", "score a repo's health", "repo")
+    add("prepare", "set this work tree's own git author/committer to the configured identity (local config only)", "id")
+    cm = add("commit", "identity-checked git commit in an item's clone", "id")
+    cm.add_argument("-m", "--message", required=True)
     add("acceptance", "evidence on whether outside contributors' PRs get merged lately", "repo")
-    add("whoami", "show which GitHub account and git identity ossforge would publish as, and whether they match the config")
+    wm = add("whoami", "show which GitHub account and git identity ossforge would publish as, and whether they match the config")
+    wm.add_argument("--dir", default=".", help="work tree to check (default: current directory)")
     v = add("vet", "vet one issue", "repo")
     v.add_argument("number", type=int)
     add("scout", "find vetted fix issues", language={}, label={"default": "help wanted"}, limit={"type": int, "default": 20})
@@ -113,9 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "whoami":
         miss = identity.missing_settings(cfg)
         login = identity.check_login(cfg)
-        wt = identity.check_worktree(cfg, ".")
+        wt = identity.check_worktree(cfg, a.dir)
         info = {"expected": dict(zip(("github_user", "git_name", "git_email"), identity.expected(cfg))),
-                "effective_git": {k: f"{n} <{e}>" for k, (n, e) in identity.effective_idents(".").items()},
+                "effective_git": {k: f"{n} <{e}>" for k, (n, e) in identity.effective_idents(a.dir).items()},
                 "missing_settings": miss, "problems": login + wt, "ready_to_publish": not miss and not login and not wt}
         if a.json:
             emit(info)
@@ -123,13 +127,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"expected: {info['expected']}\neffective git: {info['effective_git']}")
             print("READY to publish" if info["ready_to_publish"] else "NOT READY: " + "; ".join(miss and [f"{m} not set" for m in miss] or login + wt))
         return 0 if info["ready_to_publish"] else 1
+    elif a.cmd == "prepare":
+        bad = identity.apply_local(cfg, q.items[a.id].clone)
+        print("READY: this clone commits as the configured identity" if not bad else "NOT READY: " + "; ".join(bad))
+        return 1 if bad else 0
+    elif a.cmd == "commit":
+        try:
+            print("committed", identity.commit(cfg, q.items[a.id].clone, a.message))
+        except identity.IdentityError as e:
+            print("REFUSED:", e)
+            return 1
     elif a.cmd == "acceptance":
         acc = acceptance.evidence(a.repo)
         if a.json:
             emit(acc)
         else:
-            print(f"{acc.repo}: {acc.status}")
-            for r_ in acc.reasons:
+            print(f"{acc.repo}: {acc.status} (freshness: {acc.freshness}; sampled {acc.sampled_prs} closed PRs, "
+                  f"examined {acc.closed_seen} human PRs over ~{acc.covered_days}d; merger lookups {acc.merger_lookups}, "
+                  f"unresolved {acc.merger_unresolved})")
+            for r_ in acc.reasons + acc.caveats:
                 print("  -", r_)
             for m in acc.external_merged[:8]:
                 print(f"  PR #{m['pr']} by {m['author']} merged {m['merged_at'][:10]} by {m['merged_by'] or 'not looked up'}")

@@ -144,3 +144,14 @@ def decide_disclosure(setting, files: dict[str, str]) -> tuple[bool, Disclosure]
                               "disclosure: true or false in ossforge.yaml")
         return always, d
     return always, d
+
+
+_AI_DOC_NAME = re.compile(r"ai[_-]?polic|llm[_-]?polic|ai[_-]?usage|generative", re.I)
+_AI_DOC_TEXT = re.compile(r"(?:polic\w+ on (?:the )?use of (?:ai|llm)|ai tools? polic|generative ai|llm polic|ai[- ]assisted contribution)", re.I)
+
+
+def ai_policy_docs(files: dict[str, str]) -> list[str]:
+    """Docs that look like an AI/LLM contribution policy (by file name or heading text). Keyword reading only:
+    a hit means a human must read it, a miss does not mean the repo has no rules."""
+    return sorted(n for n, t in files.items() if _AI_DOC_NAME.search(n.rsplit("/", 1)[-1])
+                  or _AI_DOC_TEXT.search((t or "")[:6000]))

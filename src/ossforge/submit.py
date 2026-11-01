@@ -94,6 +94,10 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     pol = policy.scan_files(files)
     if pol.anti_ai:
         raise Refused(f"anti-AI policy in {pol.source}")
+    ai_docs = policy.ai_policy_docs(files)
+    if ai_docs and it.repo.lower() not in {r.lower() for r in cfg.ai_policy_reviewed}:
+        raise Refused(f"{it.repo} has an AI/LLM policy ({', '.join(ai_docs)}). Read it yourself; if you accept its terms add "
+                      f"{it.repo!r} to ai_policy_reviewed. ossforge only keyword-reads these docs and cannot judge compliance")
     _disclosure(cfg, it.repo)  # surfaces an unclear or conflicting disclosure policy in the dry run
     if not it.submitted.get("issue_url"):
         ms = dedupe.find_matches(it.repo, it.issue_title, it.issue_body, it.path, [])

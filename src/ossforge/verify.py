@@ -82,13 +82,30 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
         return r
     pytest = [str(py), "-m", "pytest", "-q", "-x", *test_args]
 
-    _run(["git", "checkout", base, "--", *r.fix_files], clone)
+    # Files the fix added do not exist at base: `git checkout base -- <them>` would fail for the whole batch and
+    # silently leave the fix in place. Revert existing files from base; move new files aside and put them back.
+    in_base = [f for f in r.fix_files if _run(["git", "cat-file", "-e", f"{base}:{f}"], clone)[0] == 0]
+    added = [f for f in r.fix_files if f not in in_base]
+    saved = {f: (clone / f).read_bytes() for f in added if (clone / f).is_file()}
+    reverted = True
     try:
-        rc, out = _run(pytest, clone, timeout)
-        r.failed_without_fix = rc not in (0, 124)
-        r.log.append(f"without fix rc={rc}: {out[-300:]}")
+        if in_base:
+            rc0, out0 = _run(["git", "checkout", base, "--", *in_base], clone)
+            if rc0:
+                reverted = False
+                r.log.append(f"could not revert fix files to base, no 'without fix' evidence: {out0[-200:]}")
+        for f in saved:
+            (clone / f).unlink()
+        if reverted:
+            rc, out = _run(pytest, clone, timeout)
+            r.failed_without_fix = rc not in (0, 124)
+            r.log.append(f"without fix rc={rc}: {out[-300:]}")
     finally:
-        _run(["git", "checkout", "HEAD", "--", *r.fix_files], clone)
+        if in_base:
+            _run(["git", "checkout", "HEAD", "--", *in_base], clone)
+        for f, data in saved.items():
+            (clone / f).parent.mkdir(parents=True, exist_ok=True)
+            (clone / f).write_bytes(data)
 
     rc, out = _run(pytest, clone, timeout)
     r.passed_with_fix = rc == 0
