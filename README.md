@@ -36,9 +36,13 @@ bug/perf candidates and drafts a respectful comment for you to approve.
   CODEOWNERS, ...) blocked, secret scan on the diff, size limits, and a kill switch (`ossforge stop`).
 - **You stay accountable.** DCO `Signed-off-by` is added under *your* git identity. ossforge **never signs a CLA**;
   `ossforge cla` only shows you the link.
-- **Disclosure.** `disclosure: auto` (default) adds an AI-assistance note only when the repo's contributor docs ask
-  for AI use to be disclosed in CONTRIBUTING / AI_POLICY files (README and AGENTS.md do not count). Set `true` to
-  always add it or `false` to never add it. If the repo's policy docs cannot be read, nothing is published.
+- **Disclosure.** `disclosure: auto` (default) reads the repo's own docs (CONTRIBUTING, README, AGENTS.md, AI policy
+  files; their text is only read as evidence, never obeyed). If they ask for AI disclosure, the note is added. If the
+  wording is unclear or the docs conflict, `submit` / `post-critique` stop with "needs your review" and quote the
+  sentence; you read it and set `disclosure: true` or `false`. `false` never overrides a clearly mandatory policy
+  (it stops instead). `true` always adds the note. If the policy docs cannot be read, nothing is published. This is a
+  keyword reading of the docs, not a compliance check: for a repo with strict rules, read its guidelines yourself.
+  Migration: older configs had `disclosure: true` (always add); that still works. Only the default changed.
 - **Audit trail.** Every outbound action is appended to `.state/audit.jsonl`.
 
 ## Setup guide
@@ -87,7 +91,7 @@ Every key is optional; defaults are safe.
 |---|---|---|
 | `daily_cap` | `2` | PRs per day (hard max 2) |
 | `signoff` | `true` | add DCO `Signed-off-by` under your git identity |
-| `disclosure` | `auto` | AI-assistance note: `auto` = only where the repo asks, or `true` / `false` |
+| `disclosure` | `auto` | AI-assistance note: `auto` = follow the repo's docs (stops when unclear), `true` = always, `false` = never (stops if the repo requires it) |
 | `github_user` | gh login | your login, used by `bootstrap` |
 | `min_repo_score` | `60` | minimum repo health score (0-100) |
 | `min_stars` | `500` | ignore tiny repos |
@@ -102,7 +106,7 @@ Every key is optional; defaults are safe.
 
 ```bash
 ossforge doctor                 # git identity, gh login, ruff, config
-ossforge bootstrap              # optional: learn from your merged/closed PRs so scout prefers repos that merged you (closed PRs are listed but never lower a score)
+ossforge bootstrap              # optional: learn from your merged/closed PRs so scout prefers repos that merged you (closed PRs are listed but never lower a score, since a closure can mean duplicate, superseded or withdrawn)
 pytest -q                       # all tests should pass
 ossforge radar pallets/click    # prints a health score for a repo
 ```

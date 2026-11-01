@@ -59,43 +59,88 @@ def scan_files(files: dict[str, str]) -> PolicyResult:
     return PolicyResult(False)
 
 
-# Only contributor-facing policy documents can make disclosure mandatory. README and AGENTS.md
-# are not treated as authority: AGENTS.md is written for tools, README for anyone.
-DISCLOSURE_FILES: tuple[str, ...] = (
-    "CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md",
-    "AI_POLICY.md", ".github/AI_POLICY.md",
-)
-
 _AI = re.compile(r"(?:\bai\b|\bllms?\b|copilot|chatgpt|claude|gemini|generative|machine[- ]generated)", re.I)
 _VERB = re.compile(r"(?:disclos\w*|declare|indicate|acknowledge|mention|state|label)", re.I)
 _ASK = re.compile(r"(?:\bmust\b|\bshould\b|\brequired?\b|\bplease\b|need to|\bask\b|expected|mandatory|\balways\b)", re.I)
 _NEG = re.compile(r"(?:no need|not required|not necessary|optional|don'?t need|do not need|need not)", re.I)
 
 
-def requires_disclosure(text: str) -> bool:
-    """True when one sentence of the text asks contributors to disclose AI use (and does not waive it).
+@dataclass
+class Disclosure:
+    """What the repo's own docs say about disclosing AI assistance.
 
-    Heuristic on purpose: it only decides whether to add a short note. Anti-AI bans are handled by scan_text.
+    status: mandatory | waived | ambiguous | none. This is evidence for a human, not a compliance
+    certificate: it is a sentence-level keyword reading of the docs, nothing more.
     """
+    status: str
+    source: str | None = None
+    excerpt: str = ""
+
+
+def _sentences(text: str):
     for sent in re.split(r"[.!?\n]+", text or ""):
-        if _AI.search(sent) and _VERB.search(sent) and _ASK.search(sent) and not _NEG.search(sent):
-            return True
-    return False
+        if _AI.search(sent) and _VERB.search(sent):
+            yield sent.strip()
 
 
-def disclosure_required(files: dict[str, str]) -> str | None:
-    """Return the first authoritative policy file that asks for AI-use disclosure, or None."""
-    for path in DISCLOSURE_FILES:
-        if path in files and requires_disclosure(files[path]):
-            return path
-    return None
+def classify_text(text: str) -> tuple[str, str]:
+    seen: dict[str, str] = {}
+    for sent in _sentences(text):
+        kind = "waived" if _NEG.search(sent) else "mandatory" if _ASK.search(sent) else "ambiguous"
+        seen.setdefault(kind, sent[:200])
+    if "mandatory" in seen and "waived" in seen:
+        return "ambiguous", seen["mandatory"] + " || " + seen["waived"]
+    for k in ("mandatory", "waived", "ambiguous"):
+        if k in seen:
+            return k, seen[k]
+    return "none", ""
 
 
-def want_disclosure(setting, files: dict[str, str]) -> bool:
-    """``setting`` is True (always), False (never) or "auto" (only when the repo's docs ask for it)."""
-    if isinstance(setting, str):
-        v = setting.strip().lower()
-        if v == "auto":
-            return disclosure_required(files) is not None
-        return v in ("true", "yes", "always", "on")
-    return bool(setting)
+def classify_disclosure(files: dict[str, str]) -> Disclosure:
+    """Read every policy-bearing doc (README and AGENTS.md too, as scoped project evidence; their
+    wording is only read, never obeyed). Conflicting documents are ambiguous."""
+    found: dict[str, tuple[str, str]] = {}
+    for path in POLICY_FILES:
+        if path in files:
+            st, ex = classify_text(files[path])
+            if st != "none":
+                found[path] = (st, ex)
+    kinds = {st for st, _ in found.values()}
+    if not found:
+        return Disclosure("none")
+    if "mandatory" in kinds and kinds != {"mandatory"}:
+        status = "ambiguous"
+    elif "mandatory" in kinds:
+        status = "mandatory"
+    elif "ambiguous" in kinds:
+        status = "ambiguous"
+    else:
+        status = "waived"
+    pick = next((p for p, (st, _) in found.items() if st == status), None) or next(iter(found))
+    return Disclosure(status, pick, found[pick][1])
+
+
+class NeedsReview(Exception):
+    """Policy text is unclear or conflicts with the configured setting: a human must decide."""
+
+
+def decide_disclosure(setting, files: dict[str, str]) -> tuple[bool, Disclosure]:
+    """Return (add_note, evidence). ``setting`` is "auto" (default), True ("always") or False ("never").
+
+    - mandatory policy: the note is added; setting False conflicts and raises NeedsReview.
+    - ambiguous or conflicting policy: auto raises NeedsReview; an explicit True/False is the human's call.
+    - waived or silent policy: note only if setting is True.
+    """
+    d = classify_disclosure(files)
+    auto = isinstance(setting, str) and setting.strip().lower() == "auto"
+    always = setting is True or (isinstance(setting, str) and setting.strip().lower() in ("true", "yes", "always", "on"))
+    if d.status == "mandatory":
+        if not auto and not always:
+            raise NeedsReview(f"{d.source} asks for AI disclosure ({d.excerpt!r}) but disclosure is set to false")
+        return True, d
+    if d.status == "ambiguous":
+        if auto:
+            raise NeedsReview(f"unclear AI-disclosure wording in {d.source}: {d.excerpt!r}. Read it, then set "
+                              "disclosure: true or false in ossforge.yaml")
+        return always, d
+    return always, d

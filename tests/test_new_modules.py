@@ -54,7 +54,7 @@ def test_repo_boost(tmp_path):
     s = outcomes.Stats(tmp_path / "s.json")
     s.record_repo("o/r", "merged")
     s.record_repo("x/y", "closed_unmerged")
-    assert s.repo_boost("o/r") > 0 > s.repo_boost("x/y") and s.repo_boost("new/z") == 0
+    assert s.repo_boost("o/r") > 0 and s.repo_boost("x/y") == 0 and s.repo_boost("new/z") == 0  # closures never penalise
 
 
 def _pr(**kw):

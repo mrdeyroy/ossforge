@@ -51,6 +51,13 @@ def _policy_files(repo: str) -> dict[str, str]:
         raise Refused(f"could not read {repo} policy docs ({e}); not publishing") from e
 
 
+def _disclosure(cfg: Config, repo: str) -> tuple[bool, policy.Disclosure]:
+    try:
+        return policy.decide_disclosure(cfg.disclosure, _policy_files(repo))
+    except policy.NeedsReview as e:
+        raise Refused(f"needs your review: {e}") from e
+
+
 def cla_status(repo: str, pr: int) -> str:
     """Read-only: link to the CLA bot's comment. Signing is always the contributor's own act."""
     for c in gh.api(f"repos/{repo}/issues/{pr}/comments", fresh=True) or []:
@@ -77,6 +84,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     pol = policy.scan_files(files)
     if pol.anti_ai:
         raise Refused(f"anti-AI policy in {pol.source}")
+    _disclosure(cfg, it.repo)  # surfaces an unclear or conflicting disclosure policy in the dry run
     if not it.submitted.get("issue_url"):
         ms = dedupe.find_matches(it.repo, it.issue_title, it.issue_body, it.path, [])
         if dedupe.is_duplicate(ms):
@@ -106,12 +114,14 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
     history = safety.effective_history(audit.read())
     preflight(it, limiter, cfg, history)
     plan = {"repo": it.repo, "issue": it.issue_title, "pr": it.pr_title, "branch": it.branch,
-            "resume": bool(it.submitted.get("issue_url"))}
+            "resume": bool(it.submitted.get("issue_url")),
+            "disclosure": "add" if _disclosure(cfg, it.repo)[0] else "no"}
     if not execute:
         return {"dry_run": True, **plan}
 
     prog = dict(it.submitted)
-    note = DISCLOSURE if policy.want_disclosure(cfg.disclosure, _policy_files(it.repo)) else ""
+    add_note, disc = _disclosure(cfg, it.repo)
+    note = DISCLOSURE if add_note else ""
     me = gh.api("user", fresh=True)["login"]
     cwd = str(Path(it.clone))
 
@@ -143,4 +153,5 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
         progress(pr_url=url)
         limiter.record()
         audit.log("pr_opened", repo=it.repo, pr=int(url.rsplit("/", 1)[-1]), url=url, item=it.id, state="open")
-    return {"dry_run": False, "issue": prog["issue_url"], "pr": prog["pr_url"]}
+    return {"dry_run": False, "issue": prog["issue_url"], "pr": prog["pr_url"],
+            "disclosure_added": add_note, "disclosure_policy": disc.status, "disclosure_source": disc.source}

@@ -30,7 +30,11 @@ def post(cfg: Config, audit: safety.Audit, repo: str, pr: int, body: str, execut
         raise Refused(f"anti-AI policy in {pol.source}")
     if "<describe" in body or "<" in body and ">" in body and "placeholder" in body.lower():
         raise Refused("draft still contains placeholders")
-    text = body + (NOTE if policy.want_disclosure(cfg.disclosure, files) else "")
+    try:
+        add_note, _ = policy.decide_disclosure(cfg.disclosure, files)
+    except policy.NeedsReview as e:
+        raise Refused(f"needs your review: {e}") from e
+    text = body + (NOTE if add_note else "")
     if not execute:
         return "dry-run:\n" + text
     gh.pace_write()

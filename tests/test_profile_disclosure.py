@@ -1,20 +1,41 @@
+import pytest
+
 from ossforge import config, policy, profile
 from ossforge.outcomes import Stats
 
 
-def test_requires_disclosure_detects_both_orders():
-    assert policy.requires_disclosure("Please disclose any use of AI tools in your PR.")
-    assert policy.requires_disclosure("If you used an LLM, you must mention it in the description.")
-    assert not policy.requires_disclosure("Run the tests before opening a PR.")
+def test_classify_policy_statuses():
+    assert policy.classify_text("Please disclose any use of AI tools in your PR.")[0] == "mandatory"
+    assert policy.classify_text("No need to disclose AI tools you used.")[0] == "waived"
+    assert policy.classify_text("We discuss AI disclosure on the forum.")[0] == "ambiguous"
+    assert policy.classify_text("Run the tests before opening a PR.")[0] == "none"
 
 
-def test_auto_mode_only_when_repo_asks():
-    quiet = {"CONTRIBUTING.md": "Be kind. Add tests."}
-    asks = {"CONTRIBUTING.md": "Contributors must disclose AI assistance."}
-    assert not policy.want_disclosure("auto", quiet)
-    assert policy.want_disclosure("auto", asks)
-    assert policy.want_disclosure(True, quiet)
-    assert not policy.want_disclosure(False, asks)
+def test_readme_policy_counts_as_scoped_evidence():
+    d = policy.classify_disclosure({"README.md": "Contributors must disclose LLM assistance."})
+    assert d.status == "mandatory" and d.source == "README.md"
+
+
+def test_conflicting_docs_are_ambiguous():
+    d = policy.classify_disclosure({"CONTRIBUTING.md": "You must disclose AI use.",
+                                    "README.md": "No need to disclose AI use."})
+    assert d.status == "ambiguous"
+
+
+def test_decide_disclosure_matrix():
+    must = {"CONTRIBUTING.md": "You must disclose AI use."}
+    unclear = {"CONTRIBUTING.md": "AI disclosure is discussed in the wiki."}
+    quiet = {"CONTRIBUTING.md": "Add tests."}
+    assert policy.decide_disclosure("auto", must)[0] is True
+    assert policy.decide_disclosure(True, must)[0] is True
+    with pytest.raises(policy.NeedsReview):
+        policy.decide_disclosure(False, must)  # explicit false never overrides a mandatory policy
+    with pytest.raises(policy.NeedsReview):
+        policy.decide_disclosure("auto", unclear)
+    assert policy.decide_disclosure(False, unclear)[0] is False  # human decided
+    assert policy.decide_disclosure(True, unclear)[0] is True
+    assert policy.decide_disclosure("auto", quiet)[0] is False
+    assert policy.decide_disclosure(True, quiet)[0] is True
 
 
 def test_default_disclosure_is_auto():
@@ -35,14 +56,5 @@ def test_history_import_boosts_but_closed_never_penalises(tmp_path):
     assert s.repo_boost("a/b") == 20
     s.set_history("c/d", 0, 5)
     assert s.repo_boost("c/d") == 0
-    s.record_repo("c/d", "closed_unmerged")  # an outcome ossforge recorded itself still counts
-    s.set_history("c/d", 0, 5)
-    assert s.repo_boost("c/d") == -15
-
-
-def test_only_contributor_docs_set_disclosure():
-    agents = {"AGENTS.md": "Agents must disclose AI use.", "README.md": "Please mention AI assistance."}
-    assert not policy.want_disclosure("auto", agents)
-    assert policy.want_disclosure("auto", {"CONTRIBUTING.md": "You must disclose AI assistance in the PR."})
-    assert not policy.want_disclosure("auto", {"CONTRIBUTING.md": "No need to disclose AI tools you used."})
-    assert not policy.want_disclosure("auto", {"CONTRIBUTING.md": "AI is great. Disclose your test results."})
+    s.record_repo("c/d", "closed_unmerged")
+    assert s.repo_boost("c/d") == 0
