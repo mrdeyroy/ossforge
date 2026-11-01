@@ -146,8 +146,7 @@ def scout(
         sc, why = score_issue(it, rs.score + boost)
         if acc:
             why = why + [f"outside PRs: {acc.status}, freshness {acc.freshness}, sampled {acc.sampled_prs} ({acc.reasons[0] if acc.reasons else ''})"]
-            if acc.status == "none-observed":
-                sc = max(0.0, sc - 10)
+
         out.append(Candidate(repo, it["number"], it["title"], it["html_url"], rs.score + boost, v, kind, score=sc, why=why,
                              acceptance=acc.status if acc else "not checked"))
         f["kept"] += 1
