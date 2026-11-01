@@ -1,0 +1,12 @@
+# Copy to ossforge.yaml. Every key is optional.
+daily_cap: 2              # hard maximum is 2 regardless of this value
+signoff: true             # add DCO Signed-off-by under YOUR git identity (your attestation)
+disclosure: true          # AI-assistance note on issues/PRs/comments
+min_repo_score: 60
+min_stars: 500
+languages: [python]
+labels: ["help wanted", "good first issue"]
+max_open_prs_per_repo: 1
+cooldown_days: 14
+auto_submit: false        # true: the loop submits already-verified items by itself
+patch_command: ""         # optional shell command; env OSSFORGE_ITEM is the item id

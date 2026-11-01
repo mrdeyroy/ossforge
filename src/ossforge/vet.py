@@ -1,0 +1,102 @@
+"""Issue vetting: is this issue free, clear, and in a repo that accepts outside PRs?
+
+Ported in spirit from oss-scout issue-eligibility/issue-vetting.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from . import contributing, gh, policy
+
+CLAIM_RE = re.compile(
+    r"(i'?m (working|taking)|i'?ll (take|work|do|fix|submit)|working on (this|it)|"
+    r"can i (take|work|have)|assign (this )?to me|claiming|i'?ve started)",
+    re.I,
+)
+
+
+def comment_claims_issue(body: str) -> bool:
+    return bool(CLAIM_RE.search(body or ""))
+
+
+def clear_requirements(body: str) -> bool:
+    b = body or ""
+    return len(b) >= 80 and bool(
+        re.search(r"(expected|actual|steps|reproduc|traceback|error|should|propos|feature)", b, re.I)
+    )
+
+
+@dataclass
+class Verdict:
+    issue: str
+    decision: str  # "approve" | "skip" | "anti_ai"
+    reasons: list[str] = field(default_factory=list)
+
+
+def decide(
+    *,
+    assigned: bool,
+    claimed: bool,
+    open_pr_count: int,
+    clear: bool,
+    has_contributing: bool,
+    anti_ai: policy.PolicyResult,
+    repo_ok: bool,
+    needs_assignment: bool = False,
+) -> tuple[str, list[str]]:
+    """Pure decision. Anti-AI always wins; every skip reason is reported."""
+    if anti_ai.anti_ai:
+        return "anti_ai", [f"anti-AI policy in {anti_ai.source}: {', '.join(anti_ai.matched[:2])}"]
+    skip = []
+    if assigned:
+        skip.append("assigned")
+    if claimed:
+        skip.append("claimed in comments")
+    if open_pr_count:
+        skip.append(f"{open_pr_count} open PR(s) reference it")
+    if not clear:
+        skip.append("requirements unclear")
+    if not repo_ok:
+        skip.append("repo health too low")
+    if needs_assignment:
+        skip.append("repo requires assignment before a PR (comment on the issue first)")
+    if skip:
+        return "skip", skip
+    reasons = ["unassigned, unclaimed, no competing PR"]
+    if not has_contributing:
+        reasons.append("no CONTRIBUTING.md (proceed carefully)")
+    return "approve", reasons
+
+
+def policy_texts(repo: str) -> dict[str, str]:
+    """Policy/contributing docs that exist, fetched after one listing per folder (not 9 blind probes)."""
+    out = {}
+    for p in gh.existing_files(repo, policy.POLICY_FILES):
+        t = gh.file_text(repo, p)
+        if t:
+            out[p] = t
+    return out
+
+
+def vet_issue(repo: str, number: int, repo_ok: bool = True) -> Verdict:
+    issue = gh.api(f"repos/{repo}/issues/{number}")
+    comments = gh.api(f"repos/{repo}/issues/{number}/comments") or []
+    claimed = any(comment_claims_issue(c.get("body", "")) for c in comments)
+    prs = gh.search_issues(f"repo:{repo} is:pr is:open #{number} in:body,title", per_page=10)
+    files = policy_texts(repo)
+    pol = policy.scan_files(files)
+    code, reasons = decide(
+        assigned=bool(issue.get("assignees")),
+        claimed=claimed,
+        open_pr_count=len(prs),
+        clear=clear_requirements(issue.get("body") or ""),
+        has_contributing=any("CONTRIBUTING" in k for k in files),
+        anti_ai=pol,
+        repo_ok=repo_ok,
+        needs_assignment=contributing.parse(
+            next((t for k, t in files.items() if "CONTRIBUTING" in k), "")
+        ).requires_assignment,
+    )
+    return Verdict(f"{repo}#{number}", code, reasons)

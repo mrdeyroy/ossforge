@@ -1,0 +1,48 @@
+"""Settings, loaded from ossforge.yaml (all keys optional)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+
+import yaml
+
+HARD_DAILY_MAX = 2  # not configurable above this
+
+
+@dataclass
+class Config:
+    daily_cap: int = 2
+    signoff: bool = True              # DCO trailer under the operator's own git identity
+    disclosure: bool = True           # AI-assistance note in issue/PR bodies
+    min_repo_score: int = 60
+    min_stars: int = 500
+    languages: list[str] = field(default_factory=lambda: ["python"])
+    labels: list[str] = field(default_factory=lambda: ["help wanted", "good first issue"])
+    max_open_prs_per_repo: int = 1
+    cooldown_days: int = 14           # after a PR to a repo is closed unmerged
+    state_dir: str = ".state"
+    work_dir: str = ".work"
+    kill_file: str = ".state/STOP"    # create this file to halt all writes
+    patch_command: str = ""           # optional: shell command that drafts a patch for an item JSON
+    auto_submit: bool = False         # loop submits verified items itself when true
+    spam_keywords: list[str] = field(
+        default_factory=lambda: ["bounty", "airdrop", "giveaway", "eth)", "token", "rtc", "campaign", "reward pool"]
+    )
+    cache_ttl_seconds: int = 900
+
+    @property
+    def cap(self) -> int:
+        return max(0, min(self.daily_cap, HARD_DAILY_MAX))
+
+    def path(self, name: str) -> Path:
+        return Path(self.state_dir) / name
+
+
+def load(path: str | Path = "ossforge.yaml") -> Config:
+    p = Path(path)
+    if not p.is_file():
+        return Config()
+    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    known = {f.name for f in fields(Config)}
+    return Config(**{k: v for k, v in raw.items() if k in known})
