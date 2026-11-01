@@ -5,13 +5,13 @@ def d(*lines):
     return "\n".join(["+++ b/x.py", *lines])
 
 
-def test_source_without_test_blocks():
+def test_code_without_test_warns_but_does_not_block():
     f = review.review_diff(["src/a.py"], d("+x = 1"))
-    assert review.blocking(f) == ["source changed but no test file changed"]
+    assert not review.blocking(f) and "no test file changed" in f[0].msg
 
 
-def test_docs_only_change_needs_no_test():
-    assert review.blocking(review.review_diff(["README.md"], d("+hello"))) == []
+def test_config_and_docs_changes_need_no_test_note():
+    assert review.review_diff([".github/workflows/ci.yml", "pyproject.toml", "README.md"], d("+x")) == []
 
 
 def test_debug_leftovers_are_warnings():

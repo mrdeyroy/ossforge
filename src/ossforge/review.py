@@ -2,7 +2,7 @@
 
 Maintainers reject PRs for ordinary reasons: no test, stray debug code, unrelated churn, the PR
 template ignored, a changelog the repo expects. This checks those from the diff and the repo's own
-files. ``error`` findings block `submit`; ``warn`` findings are shown for a human to judge.
+files. ``warn`` findings are shown for a human to judge; an ``error`` level exists for hard gates and blocks `submit`.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ DEBUG_RES = (
     (re.compile(r"^\+\s*(?:#|//)\s*(?:TODO|FIXME|XXX|HACK)\b"), "new TODO/FIXME comment"),
     (re.compile(r"^\+\s*print\((?:f?['\"](?:DEBUG|here|HERE|xxx))"), "debug print left in"),
 )
+CODE_EXTS = (".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".rb", ".c", ".cc", ".cpp", ".h", ".cs", ".php")
 CHANGELOG_NAMES = ("CHANGELOG.md", "CHANGES.md", "HISTORY.md", "NEWS.md", "CHANGELOG.rst", "CHANGES.rst")
 NEWS_DIRS = ("changes/", "changelog.d/", "newsfragments/", "news/", "docs/changes/")
 
@@ -45,9 +46,12 @@ def review_diff(
 ) -> list[Finding]:
     out: list[Finding] = []
     tests = [f for f in changed if predictor.is_test_path(f)]
-    src = [f for f in changed if not predictor.is_test_path(f) and not f.lower().endswith((".md", ".rst", ".txt"))]
+    src = [f for f in changed if not predictor.is_test_path(f) and f.lower().endswith(CODE_EXTS)]
     if src and not tests:
-        out.append(Finding("error", "source changed but no test file changed"))
+        # a warning, not a block: docs/config/refactors, or code already covered by existing tests, are legitimate.
+        # `verify` is what proves a fix with a test that fails before and passes after.
+        out.append(Finding("warn", "code changed but no test file changed: fine only if existing tests already "
+                                   "cover it (refactor) or it is not behaviour; otherwise add one"))
     for ln in diff.splitlines():
         if ln.startswith("+++"):
             continue

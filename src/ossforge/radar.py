@@ -115,6 +115,9 @@ def _days(a: str | None, b: str | None) -> float | None:
 RADAR_TTL = 24 * 3600  # repo health does not change hour to hour
 
 
+DEAD_AFTER_DAYS = 365
+
+
 def analyze(repo: str, days: int = 90, stale_days: int = 14) -> RepoScore:
     hit = gh.cache_get(f"radar:{repo}", RADAR_TTL)
     if hit:
@@ -130,10 +133,16 @@ def _analyze(repo: str, days: int, stale_days: int) -> RepoScore:
     since = (now.date() - timedelta(days=days)).isoformat()
     stale = (now.date() - timedelta(days=stale_days)).isoformat()
     merged_q = f"repo:{repo} is:pr is:merged merged:>={since}"
-    merged = gh.search_count(merged_q)
+    pushed = _days(info.get("pushed_at"), now.isoformat())
+    if info.get("archived") or (pushed is not None and pushed > DEAD_AFTER_DAYS):
+        # no search calls spent on a repo nobody is maintaining
+        flag = "archived" if info.get("archived") else "inactive"
+        return RepoScore(repo, 0, "Avoid", [f"{flag}: last push {int(pushed or 0)}d ago"], [flag])
+    page = gh.search_page(merged_q, per_page=20)
+    merged = page["total_count"]
     open_n = gh.search_count(f"repo:{repo} is:pr is:open")
     stale_n = gh.search_count(f"repo:{repo} is:pr is:open created:<{stale}")
-    sample = gh.search_issues(merged_q, per_page=20)
+    sample = page["items"]
     md = [d for d in (_days(i.get("created_at"), i.get("closed_at")) for i in sample) if d is not None]
     ext = [i for i in sample if i.get("author_association") not in ("OWNER", "MEMBER", "COLLABORATOR")]
     sig = RepoSignals(
