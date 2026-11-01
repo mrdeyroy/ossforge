@@ -1,46 +1,220 @@
 # ossforge
 
-Scout -> vet -> hunt -> verify -> submit, with a daily cap and a safety layer.
-Built from the best parts of three projects:
+**Find, verify and file quality open-source contributions — with guard rails.**
 
-| From | Taken |
+ossforge scouts healthy projects, reads their code for real bugs, checks that nobody has already reported
+or fixed the problem, and only then helps you file an **issue and a pull request together**. It is built for
+contributors who want to send maintainers *fewer, better* contributions, not more noise.
+
+It combines the strongest ideas from three projects:
+
+| From | What ossforge took |
 |---|---|
-| GitSense | repo health radar (`radar.py`), PR merge predictor (`predictor.py`), outcome calibration idea (`outcomes.py`) |
-| oss-scout | issue vetting, claim detection, anti-AI policy scan, personalization boost, API budget and cache (`vet.py`, `policy.py`, `gh.py`) |
-| ContribAI | consent/guard mindset, protected paths, evidence log, PR patrol (`safety.py`, `patrol.py`) |
+| [GitSense](https://github.com/he-yufeng/GitSense) | repo health radar, PR merge-likelihood predictor, outcome calibration |
+| [oss-scout](https://github.com/costajohnt/oss-scout) | issue vetting, claim detection, anti-AI policy scan, personalization, API budget and cache |
+| [ContribAI](https://github.com/tang-vu/ContribAI) | consent-first mindset, protected paths, evidence log, PR patrol |
 
-## Rules (enforced in code)
-
-- At most **2 PRs/day** (`limiter.py`, not configurable above 2).
-- Issue and PR are filed **together**; the PR says `Closes #N`.
-- Repos with an **anti-AI policy are skipped and reported**, never contacted.
-- Only **verified** items can be submitted: a new test must fail without the fix and pass with it.
-- Fresh **duplicate search** (open + closed issues/PRs + recent commits) right before filing.
-- One open PR per repo, cooldown after an unmerged close, protected paths (workflows, LICENSE, CODEOWNERS...) blocked,
-  secret scan on the diff, size limits, kill switch (`ossforge stop`).
-- DCO `Signed-off-by` is applied under **your** git identity. **ossforge never signs a CLA**; `ossforge cla` only shows you the link.
-- AI-assistance disclosure on issues, PRs and comments (`disclosure: true`).
-- Every outbound action is appended to `.state/audit.jsonl`.
-
-## Commands
+## How it works
 
 ```
-ossforge scout|features   find vetted fix / feature issues (spam filtered, health gated)
-ossforge radar|vet        inspect a repo / one issue
-ossforge hunt REPO        clone, scan whole repo (builtin + ruff + JS), rank, drop duplicates, enqueue
-ossforge queue            list items
-ossforge verify ID ...    run tests without/with the fix in a venv, then mark verified
-ossforge reject ID        mark a false positive (updates per-detector precision)
-ossforge submit ID [--yes]   dry-run by default; resumes after partial failure
-ossforge critique|post-critique   score someone's open PR, draft and (after approval) post a constructive review
-ossforge patrol           outcomes + what each open PR needs (DCO, CLA, CI, conflicts, feedback)
-ossforge loop [--once]    continuous research; writes .state/digest.md
-ossforge stop|resume      kill switch
+scout ──> vet ──> hunt ──> (you or an agent write test + fix) ──> verify ──> submit ──> patrol
+  │         │        │                                              │          │          │
+  │         │        │                                              │          │          └ outcomes, CI/DCO/CLA, feedback
+  │         │        │                                              │          └ issue + PR together, dry-run by default
+  │         │        │                                              └ new test must FAIL without the fix and PASS with it
+  │         │        └ scan the whole repo, rank findings, drop duplicates
+  │         └ unassigned? unclaimed? no competing PR? clear requirements? anti-AI policy?
+  └ healthy repos only (merge speed, maintainer response, stale backlog, CI)
 ```
+
+You can also **review other people's open PRs**: `critique` scores merge likelihood, scans the added lines for
+bug/perf candidates and drafts a respectful comment for you to approve.
+
+## Rules enforced in code
+
+- **At most 2 PRs per day.** Hard cap, not configurable above 2.
+- **Repos with an anti-AI contribution policy are skipped** and listed in the report. ossforge never opens an
+  issue, comment or PR there.
+- **Only verified items can be submitted.** A candidate becomes real only when a new test fails without the fix and
+  passes with it.
+- **Duplicate guard.** Open *and* closed issues/PRs, plus recent commits touching the file, are searched right
+  before filing.
+- **Safety layer.** One open PR per repo, cooldown after an unmerged close, protected paths (workflows, LICENSE,
+  CODEOWNERS, ...) blocked, secret scan on the diff, size limits, and a kill switch (`ossforge stop`).
+- **You stay accountable.** DCO `Signed-off-by` is added under *your* git identity. ossforge **never signs a CLA**;
+  `ossforge cla` only shows you the link.
+- **Disclosure.** Issues, PRs and comments carry an AI-assistance note (`disclosure: true`).
+- **Audit trail.** Every outbound action is appended to `.state/audit.jsonl`.
+
+## Setup guide
+
+### 1. Prerequisites
+
+| Tool | Why | Check |
+|---|---|---|
+| Python 3.10+ | runs ossforge | `python --version` |
+| Git | cloning, branches, commits | `git --version` |
+| [GitHub CLI](https://cli.github.com/) (`gh`) | all GitHub access (no token handling in ossforge) | `gh --version` |
+
+### 2. Log in to GitHub and set your identity
+
+```bash
+gh auth login                         # choose GitHub.com, HTTPS, log in via browser
+git config --global user.name  "Your Name"
+git config --global user.email "you@example.com"
+```
+
+Commits and the DCO sign-off use **this** identity. Use the name you want on your contributions.
+
+### 3. Install
+
+```bash
+git clone https://github.com/parijat1222q/ossforge.git
+cd ossforge
+python -m venv .venv
+# Windows (PowerShell):  .venv\Scripts\Activate.ps1
+# macOS / Linux:         source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+`.[dev]` also installs `pytest` and `ruff`. ossforge uses `ruff` for extra bug detection and for linting during
+`verify`, so keep it installed.
+
+### 4. Configure (optional)
+
+```bash
+cp ossforge.example.yaml ossforge.yaml     # Windows: copy ossforge.example.yaml ossforge.yaml
+```
+
+Every key is optional; defaults are safe.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `daily_cap` | `2` | PRs per day (hard max 2) |
+| `signoff` | `true` | add DCO `Signed-off-by` under your git identity |
+| `disclosure` | `true` | AI-assistance note on issues/PRs/comments |
+| `min_repo_score` | `60` | minimum repo health score (0-100) |
+| `min_stars` | `500` | ignore tiny repos |
+| `languages` | `[python]` | languages to scout |
+| `labels` | `help wanted`, `good first issue` | issue labels to search (one per pass, rotating) |
+| `max_open_prs_per_repo` | `1` | do not pile onto one project |
+| `cooldown_days` | `14` | pause after a PR is closed unmerged |
+| `auto_submit` | `false` | let the loop submit already-verified items |
+| `patch_command` | `""` | optional shell command that drafts a patch; env `OSSFORGE_ITEM` = item id |
+
+### 5. Check it works
+
+```bash
+pytest -q                       # all tests should pass
+ossforge radar pallets/click    # prints a health score for a repo
+```
+
+## Where files go (you do not create these)
+
+ossforge creates its working folders **in the directory you run it from**, the first time they are needed.
+They are git-ignored, so they never get committed or pushed.
+
+| Path | Created by | What it holds | Safe to delete? |
+|---|---|---|---|
+| `.work/` | `hunt`, `audit`, `verify` | shallow clones of target repos and a per-repo virtualenv in `.work/venvs/` | yes, it is re-cloned on demand |
+| `.state/queue.json` | `hunt`, `loop` | candidate queue and each item's status | resets your queue |
+| `.state/audit.jsonl` | `submit`, `loop`, `patrol` | append-only log of every issue/PR/comment opened | **keep**: it drives the one-PR-per-repo and cooldown rules |
+| `.state/stats.json` | `verify`, `reject`, `patrol` | per-detector precision and per-repo merge history | resets learning |
+| `.state/daily.json` | `submit` | today's PR counter (the daily cap) | resets the cap for today |
+| `.state/cache/` | any GitHub call | cached API responses (15 min), repo health (24 h) | yes |
+| `.state/digest.md` | `loop`, `digest` | readable report of the last pass | yes |
+| `.state/STOP` | `ossforge stop` | kill switch: while it exists, nothing is written to GitHub | remove with `ossforge resume` |
+| `.venv/` | you (step 3) | ossforge's own virtualenv | yes, recreate with step 3 |
+| `.pytest_cache/`, `.ruff_cache/`, `__pycache__/`, `*.egg-info/` | pytest, ruff, Python, pip | tool caches and build metadata | yes |
+
+Run ossforge from one folder consistently (for example the repo root) so it always finds the same `.state/`.
+To keep state elsewhere, set `state_dir` and `work_dir` in `ossforge.yaml`.
+
+## First run, step by step
+
+```bash
+# 1. look around (read-only)
+ossforge scout --language python --limit 10
+ossforge radar owner/repo
+
+# 2. scan one promising repo; duplicates are dropped automatically
+ossforge hunt owner/repo
+ossforge queue
+
+# 3. read the top candidate in .work/owner__repo/. If it is a false positive:
+ossforge reject "<item id>" --reason "intentional, documented"
+
+# 4. if it is a real bug: on a branch in the clone, add a failing test + the fix, commit, then
+ossforge verify "<item id>" --branch fix/short-name --tests path/to/test_file.py::test_name \
+    --issue-title "..." --issue-body-file issue.md --pr-title "..." --pr-body-file pr.md
+
+# 5. preview, then submit (issue + PR together)
+ossforge submit "<item id>"            # dry run, shows what would happen
+ossforge submit "<item id>" --yes      # real submit
+
+# 6. afterwards
+ossforge cla owner/repo <pr-number>    # shows the CLA link if the project requires one; you sign it yourself
+ossforge patrol                        # what each open PR needs next
+```
+
+### Continuous mode
+
+```bash
+ossforge loop --once          # one pass: patrol -> scout -> hunt -> digest (read .state/digest.md)
+ossforge loop                 # keep going every 6 hours (--interval-hours N)
+ossforge stop                 # kill switch
+ossforge resume
+```
+
+The loop never submits anything unless `auto_submit: true` **and** an item is already `verified`.
+
+## Command reference
+
+```
+scout / features          find vetted fix / feature issues (spam filtered, health gated)
+radar REPO                health score for a repo
+vet REPO NUMBER           vet one issue
+hunt REPO                 clone, scan, rank, de-duplicate, enqueue
+audit REPO                scan and print candidates without queueing
+queue                     list queue items
+verify ID ...             run tests without/with the fix, then mark verified
+reject ID                 mark a false positive (improves detector ranking)
+submit ID [--yes]         issue + PR together; dry run unless --yes; resumes after a partial failure
+critique REPO PR          score someone's open PR and draft a review (nothing is posted)
+post-critique REPO PR F   post an approved comment from file F (dry run unless --yes)
+cla REPO PR               show the CLA bot's comment (read-only)
+patrol                    outcomes and what each open PR needs
+digest                    print the daily report
+loop [--once]             continuous research
+stop / resume             kill switch on / off
+```
+
+Use `--config path.yaml` *before* the subcommand to load a different config.
+
+## Troubleshooting
+
+- **`exceeded a secondary rate limit`**: GitHub throttles bursts of requests even when quota remains. ossforge paces
+  itself (searches capped at 9 per minute) and stops the pass cleanly; wait a few minutes and run again.
+- **`REFUSED: ...`** from `submit`: a safety gate fired (not verified, daily cap, duplicate, anti-AI policy,
+  protected path, kill switch). The message names the gate.
+- **DCO check fails on a PR**: commits need `Signed-off-by`. With `signoff: true` ossforge adds it before the
+  first push.
+- **CLA bot comment on your PR**: open the link from `ossforge cla` and sign it yourself. It is a personal legal
+  agreement, so ossforge never does it for you.
 
 ## Honest limits
 
-- Static detectors only produce *candidates*; most are false positives. Only `verify` makes one real.
-- Writing the failing test and the patch is done by you or an agent (`patch_command` hook). ossforge does not invent patches.
-- `verify` uses a venv with a scrubbed environment (no tokens). That is hygiene, not a sandbox: use Docker for untrusted repos.
-- Detectors cover Python deeply and a few JS/TS patterns.
+- Static detectors only produce *candidates*; many are false positives. Only `verify` makes one real.
+- Writing the failing test and the patch is up to you or an agent (`patch_command` hook). ossforge does not invent
+  patches.
+- `verify` runs the project's tests in a virtualenv with a scrubbed environment (no GitHub tokens). That is hygiene,
+  not a sandbox; use Docker for repositories you do not trust.
+- Detectors are strongest for Python; JavaScript/TypeScript has a few patterns.
+
+## Contributing to ossforge
+
+Issues and PRs are welcome. Run `pytest -q` and `ruff check src tests` before opening a PR.
+
+## License
+
+MIT. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for credits.
