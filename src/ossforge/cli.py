@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from . import audit as audit_mod
-from . import comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, safety, scout, submit, vet, verify
+from . import comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -103,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
         fn = (lambda: scout.scout(cfg, stats, a.language, a.label, a.limit)) if a.cmd == "scout" else \
              (lambda: scout.scout_features(cfg, stats, a.language, a.limit))
         for c_ in fn():
-            print(f"[{c_.verdict.decision:7}] {c_.repo}#{c_.number} repo={c_.repo_score} {c_.title}")
+            print(f"[{c_.verdict.decision:7}] {c_.repo}#{c_.number} score={c_.score:.0f} {c_.title}")
+            print(f"          why: {'; '.join(c_.why)}")
             print(f"          {'; '.join(c_.verdict.reasons)}\n          {c_.url}")
     elif a.cmd == "critique":
         x = critique.critique(a.repo, a.number)
@@ -173,6 +174,14 @@ def main(argv: list[str] | None = None) -> int:
             q.set(a.id, status="submitted", submitted=res)
             q.save()
         print(res)
+    elif a.cmd == "selfreview":
+        it = q.items[a.id]
+        base = submit._base(it.clone)
+        found = review.review_branch(it.repo, it.clone, base, it.pr_body, submit._run, gh)
+        for f in found:
+            print(f"[{f.level}] {f.msg}")
+        print("ok: nothing to flag" if not found else "")
+        return 1 if review.blocking(found) else 0
     elif a.cmd == "cla":
         url = submit.cla_status(a.repo, a.pr)
         print(url or "No CLA bot comment yet.", "\nOpen it and sign as yourself; ossforge never signs a CLA.")

@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from . import contributing, dedupe, gh, policy, safety, vet
+from . import contributing, dedupe, gh, policy, review, safety, vet
 from .config import Config
 from .limiter import DailyLimiter
 from .queue import Item
@@ -99,6 +99,10 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     bad = safety.check_diff(changed, diff)
     if bad:
         raise Refused("diff blocked: " + "; ".join(bad))
+    found = review.review_branch(it.repo, cwd, base, it.pr_body, _run, gh)
+    if review.blocking(found):
+        raise Refused("self-review: " + "; ".join(review.blocking(found)))
+    it.notes = [n for n in it.notes if not n.startswith("review: ")] + [f"review: {f.msg}" for f in found if f.level == "warn"]
     conv = contributing.parse(next((t for k, t in files.items() if "CONTRIBUTING" in k), ""))
     if conv.requires_assignment:
         raise Refused("repo requires assignment first: " + "; ".join(conv.notes))
