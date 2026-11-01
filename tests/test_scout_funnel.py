@@ -23,6 +23,7 @@ def test_no_matches_is_distinct_from_filtered(monkeypatch, tmp_path):
 
 
 def test_rate_limit_reports_partial_not_silence(monkeypatch, tmp_path):
+    monkeypatch.setattr(gh, "api", lambda *a, **k: {"stargazers_count": 500})
     monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [_issue(1), _issue(2)])
     monkeypatch.setattr(vet, "clear_requirements", lambda b: True)
 
@@ -39,6 +40,7 @@ def test_rate_limit_reports_partial_not_silence(monkeypatch, tmp_path):
 
 
 def test_kept_counts(monkeypatch, tmp_path):
+    monkeypatch.setattr(gh, "api", lambda *a, **k: {"stargazers_count": 500})
     monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [_issue(1)])
     monkeypatch.setattr(vet, "clear_requirements", lambda b: True)
     monkeypatch.setattr(radar, "analyze", lambda r: radar.RepoScore(r, 80, "Good"))
@@ -56,3 +58,32 @@ def test_unknown_queue_id_is_a_clean_error(tmp_path, capsys):
     cfgf.write_text(f"kill_file: {tmp_path}/STOP\nstate_dir: {tmp_path}/.state\n")
     rc = cli.main(["--config", str(cfgf), "submit", "nope"])
     assert rc == 2 and "unknown queue id" in capsys.readouterr().err
+
+
+def test_min_stars_checked_against_repo_not_issue_search(monkeypatch, tmp_path):
+    monkeypatch.setattr(vet, "clear_requirements", lambda b: True)
+    monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [_issue(1), _issue(2)])
+    calls = []
+    monkeypatch.setattr(gh, "api", lambda path, **k: calls.append(path) or {"stargazers_count": 18})
+    monkeypatch.setattr(radar, "analyze", lambda r: (_ for _ in ()).throw(AssertionError("below minimum")))
+    assert scout.scout(_cfg(tmp_path)) == []
+    assert calls == ["repos/acme/lib"]
+    assert scout.LAST_FUNNEL["below_min_stars"] == 2
+    assert "below_min_stars" in scout.explain_funnel(scout.LAST_FUNNEL)
+
+
+def test_star_metadata_failure_is_not_a_pass(monkeypatch, tmp_path):
+    monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [_issue(1)])
+    monkeypatch.setattr(vet, "clear_requirements", lambda b: True)
+    monkeypatch.setattr(gh, "api", lambda *a, **k: {})
+    assert scout.scout(_cfg(tmp_path)) == []
+    assert scout.LAST_FUNNEL["repo_metadata_failed"] == 1
+    assert "repo_metadata_failed" in scout.explain_funnel(scout.LAST_FUNNEL)
+
+
+def test_star_metadata_rate_limit_stops_pass(monkeypatch, tmp_path):
+    monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [_issue(1)])
+    monkeypatch.setattr(vet, "clear_requirements", lambda b: True)
+    monkeypatch.setattr(gh, "api", lambda *a, **k: (_ for _ in ()).throw(gh.RateLimited("cooldown", 429, 60)))
+    assert scout.scout(_cfg(tmp_path)) == []
+    assert scout.explain_funnel(scout.LAST_FUNNEL).startswith("STOPPED EARLY")
