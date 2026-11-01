@@ -31,6 +31,7 @@ class Item:
     submitted: dict = field(default_factory=dict)  # partial progress lives here (issue_url, fork_pushed, pr_url)
     work: str = "fix"  # fix | feature
     rank: float = 0.0
+    snippet: str = ""  # a few lines around the finding so a human can accept or reject it quickly
 
 
 class Queue:

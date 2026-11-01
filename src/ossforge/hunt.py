@@ -28,6 +28,15 @@ def policy_of(dest: Path) -> policy.PolicyResult:
     return policy.scan_files(files)
 
 
+def snippet(dest: Path, path: str, line: int, radius: int = 4) -> str:
+    try:
+        lines = (dest / path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    lo, hi = max(0, line - 1 - radius), min(len(lines), line + radius)
+    return "\n".join(f"{n + 1:5d}{'>' if n + 1 == line else ' '} {lines[n]}" for n in range(lo, hi))
+
+
 def hunt(cfg: Config, repo: str, q: Queue, stats: Stats, work: str = "fix") -> dict:
     dest = clone(cfg, repo)
     pol = policy_of(dest)
@@ -41,7 +50,7 @@ def hunt(cfg: Config, repo: str, q: Queue, stats: Stats, work: str = "fix") -> d
         if clean >= TOP_PER_REPO:
             break
         it = Item(item_id(repo, f.path, f.kind, f.line), repo, f.path, f.line, f.kind, f.detail,
-                  clone=str(dest), work=work, rank=score)
+                  clone=str(dest), work=work, rank=score, snippet=snippet(dest, f.path, f.line))
         if it.id in q.items:
             continue
         ms = dedupe.find_matches(repo, f"{f.kind} {f.path}", f.detail, f.path, [f.kind.replace("-", " ")])

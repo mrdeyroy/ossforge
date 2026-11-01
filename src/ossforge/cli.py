@@ -87,10 +87,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[{'ok' if ok else 'FIX'}] {name}: {detail}")
         return 0 if all(ok for _, ok, _ in results) else 1
     elif a.cmd == "bootstrap":
-        r = profile.bootstrap(stats, cfg.github_user)
+        r = profile.bootstrap(stats, cfg.github_user, cfg.own_orgs)
         print(f"{r['user']}: merged PRs in {r['merged_repos']} repos, closed unmerged in {r['closed_repos']} repos")
         for repo, n in sorted(r["merged"].items(), key=lambda kv: -kv[1]):
             print(f"  merged x{n}: {repo}")
+        if r["unclassified"]:
+            print("  member-org repos not counted (add the org to own_orgs if it is yours, they stay out otherwise):",
+                  ", ".join(r["unclassified"]))
     elif a.cmd == "radar":
         x = radar.analyze(a.repo)
         print(f"{x.repo}: {x.score}/100 {x.recommendation} flags={x.flags}")
@@ -136,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[{i.status:9}] {i.rank:.2f} {i.id}  {i.detail}")
             for n in i.notes:
                 print("              ", n)
+            if i.snippet and i.status == "clean":
+                print("\n".join("              | " + ln for ln in i.snippet.splitlines()))
     elif a.cmd == "verify":
         it = q.items[a.id]
         clone = Path(it.clone)
