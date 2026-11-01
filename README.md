@@ -6,13 +6,6 @@ ossforge scouts healthy projects, reads their code for real bugs, checks that no
 or fixed the problem, and only then helps you file an **issue and a pull request together**. It is built for
 contributors who want to send maintainers *fewer, better* contributions, not more noise.
 
-It combines the strongest ideas from three projects:
-
-| From | What ossforge took |
-|---|---|
-| [GitSense](https://github.com/he-yufeng/GitSense) | repo health radar, PR merge-likelihood predictor, outcome calibration |
-| [oss-scout](https://github.com/costajohnt/oss-scout) | issue vetting, claim detection, anti-AI policy scan, personalization, API budget and cache |
-| [ContribAI](https://github.com/tang-vu/ContribAI) | consent-first mindset, protected paths, evidence log, PR patrol |
 
 ## How it works
 
