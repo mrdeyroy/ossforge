@@ -13,7 +13,10 @@ HARD_DAILY_MAX = 2  # not configurable above this
 @dataclass
 class Config:
     daily_cap: int = 2
-    signoff: bool = True              # DCO trailer under the operator's own git identity
+    signoff: bool = False             # add a DCO Signed-off-by to every repo (an attestation: approve it yourself)
+    signoff_repos: list[str] = field(default_factory=list)  # per-repo approval of the DCO sign-off, "owner/name"
+    git_name: str = ""                # expected commit author/committer name; publishing stops if it differs
+    git_email: str = ""               # expected commit author/committer email
     disclosure: bool | str = "auto"   # true | false | "auto": add the AI-assistance note only where the repo asks for it
     min_repo_score: int = 60
     min_stars: int = 500
@@ -31,7 +34,10 @@ class Config:
     )
     cache_ttl_seconds: int = 900
     own_orgs: list[str] = field(default_factory=list)  # orgs whose repos are yours, ignored by `bootstrap`
-    github_user: str = ""             # your login; empty = ask gh. Used by `bootstrap`
+    github_user: str = ""             # your GitHub login. Required before any publish; must equal the gh login
+
+    def signoff_for(self, repo: str) -> bool:
+        return self.signoff or repo.lower() in {r.lower() for r in self.signoff_repos}
 
     @property
     def cap(self) -> int:

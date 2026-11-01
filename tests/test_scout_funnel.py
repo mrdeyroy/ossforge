@@ -43,6 +43,8 @@ def test_kept_counts(monkeypatch, tmp_path):
     monkeypatch.setattr(vet, "clear_requirements", lambda b: True)
     monkeypatch.setattr(radar, "analyze", lambda r: radar.RepoScore(r, 80, "Good"))
     monkeypatch.setattr(vet, "vet_issue", lambda *a, **k: vet.Verdict("acme/lib#1", "approve"))
+    from ossforge import acceptance
+    monkeypatch.setattr(acceptance, "evidence", lambda r: acceptance.Acceptance(r, "accepting", ["x"]))
     out = scout.scout(_cfg(tmp_path))
     assert len(out) == 1 and scout.LAST_FUNNEL["approved"] == 1
     assert scout.explain_funnel(scout.LAST_FUNNEL).startswith("1 of 1")

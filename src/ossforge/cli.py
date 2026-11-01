@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
 import sys
 from pathlib import Path
 
+from . import acceptance, identity
 from . import audit as audit_mod
 from . import comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -21,6 +24,7 @@ def _ctx(cfg: Config):
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser("ossforge")
     ap.add_argument("--config", default="ossforge.yaml")
+    ap.add_argument("--json", action="store_true", help="machine-readable output (radar, acceptance, scout, features, queue, doctor, whoami, submit)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def add(name, help_, *args, **flags):
@@ -32,6 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     add("radar", "score a repo's health", "repo")
+    add("acceptance", "evidence on whether outside contributors' PRs get merged lately", "repo")
+    add("whoami", "show which GitHub account and git identity ossforge would publish as, and whether they match the config")
     v = add("vet", "vet one issue", "repo")
     v.add_argument("number", type=int)
     add("scout", "find vetted fix issues", language={}, label={"default": "help wanted"}, limit={"type": int, "default": 20})
@@ -78,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown queue id {a.id!r}. Run `queue` to list ids.", file=sys.stderr)
         return 2
 
+    def emit(obj) -> None:
+        print(json.dumps(obj, indent=2, default=lambda o: dataclasses.asdict(o) if dataclasses.is_dataclass(o) else str(o)))
+
     if a.cmd == "stop":
         Path(cfg.kill_file).parent.mkdir(parents=True, exist_ok=True)
         Path(cfg.kill_file).write_text("stopped\n")
@@ -87,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
         print("kill switch off")
     elif a.cmd == "doctor":
         results = doctor.check(cfg)
+        if a.json:
+            emit([{"check": n, "ok": ok, "detail": d} for n, ok, d in results])
+            return 0 if all(ok for _, ok, _ in results) else 1
         for name, ok, detail in results:
             print(f"[{'ok' if ok else 'FIX'}] {name}: {detail}")
         return 0 if all(ok for _, ok, _ in results) else 1
@@ -98,8 +110,34 @@ def main(argv: list[str] | None = None) -> int:
         if r["unclassified"]:
             print("  member-org repos not counted (add the org to own_orgs if it is yours, they stay out otherwise):",
                   ", ".join(r["unclassified"]))
+    elif a.cmd == "whoami":
+        miss = identity.missing_settings(cfg)
+        login = identity.check_login(cfg)
+        wt = identity.check_worktree(cfg, ".")
+        info = {"expected": dict(zip(("github_user", "git_name", "git_email"), identity.expected(cfg))),
+                "effective_git": {k: f"{n} <{e}>" for k, (n, e) in identity.effective_idents(".").items()},
+                "missing_settings": miss, "problems": login + wt, "ready_to_publish": not miss and not login and not wt}
+        if a.json:
+            emit(info)
+        else:
+            print(f"expected: {info['expected']}\neffective git: {info['effective_git']}")
+            print("READY to publish" if info["ready_to_publish"] else "NOT READY: " + "; ".join(miss and [f"{m} not set" for m in miss] or login + wt))
+        return 0 if info["ready_to_publish"] else 1
+    elif a.cmd == "acceptance":
+        acc = acceptance.evidence(a.repo)
+        if a.json:
+            emit(acc)
+        else:
+            print(f"{acc.repo}: {acc.status}")
+            for r_ in acc.reasons:
+                print("  -", r_)
+            for m in acc.external_merged[:8]:
+                print(f"  PR #{m['pr']} by {m['author']} merged {m['merged_at'][:10]} by {m['merged_by'] or 'not looked up'}")
     elif a.cmd == "radar":
         x = radar.analyze(a.repo)
+        if a.json:
+            emit(x)
+            return 0
         print(f"{x.repo}: {x.score}/100 {x.recommendation} flags={x.flags}")
         for n in x.notes:
             print("  -", n)
@@ -111,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
              (lambda: scout.scout_features(cfg, stats, a.language, a.limit))
         res_ = fn()
         print("scout:", scout.explain_funnel(scout.LAST_FUNNEL), file=sys.stderr)
+        if a.json:
+            emit({"funnel": scout.LAST_FUNNEL, "explanation": scout.explain_funnel(scout.LAST_FUNNEL), "candidates": res_})
+            return 0
         for c_ in res_:
             print(f"[{c_.verdict.decision:7}] {c_.repo}#{c_.number} score={c_.score:.0f} {c_.title}")
             print(f"          why: {'; '.join(c_.why)}")
@@ -141,6 +182,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"SKIP {a.repo}: anti-AI policy in {r['anti_ai']}" if r["anti_ai"]
               else f"{a.repo}: {r['clean']} clean (need verification), {r['duplicate']} duplicate")
     elif a.cmd == "queue":
+        if a.json:
+            emit([dataclasses.asdict(i) for i in sorted(q.items.values(), key=lambda i: -i.rank)])
+            return 0
         for i in sorted(q.items.values(), key=lambda i: -i.rank):
             print(f"[{i.status:9}] {i.rank:.2f} {i.id}  {i.detail}")
             for n in i.notes:
@@ -179,12 +223,18 @@ def main(argv: list[str] | None = None) -> int:
             res = submit.submit(q.items[a.id], limiter, cfg, audit, execute=a.yes,
                                 save=lambda p: (q.set(a.id, submitted=p), q.save()))
         except submit.Refused as e:
-            print("REFUSED:", e)
+            if a.json:
+                emit({"refused": str(e)})
+            else:
+                print("REFUSED:", e)
             return 1
+        if a.json:
+            emit(res)
         if a.yes:
             q.set(a.id, status="submitted", submitted=res)
             q.save()
-        print(res)
+        if not a.json:
+            print(res)
     elif a.cmd == "selfreview":
         it = q.items[a.id]
         base = submit._base(it.clone)

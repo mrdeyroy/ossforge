@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 
+from . import identity
 from .config import Config
 
 
@@ -27,8 +28,17 @@ def check(cfg: Config) -> list[tuple[str, bool, str]]:
         res.append(("gh logged in", rc == 0, out.splitlines()[0] if out else ""))
     name = _out(["git", "config", "user.name"])[1]
     email = _out(["git", "config", "user.email"])[1]
-    res.append(("git identity set", bool(name and email), f"{name} <{email}>" if name and email else
-                "set user.name and user.email: commits and the DCO sign-off use them"))
+    res.append(("git identity set (this directory)", bool(name and email), f"{name} <{email}>" if name and email else
+                "set user.name and user.email: new commits use them"))
+    miss = identity.missing_settings(cfg)
+    res.append(("expected identity configured", not miss,
+                "github_user, git_name, git_email" if not miss else "set in ossforge.yaml: " + ", ".join(miss) + " (publishing stops until set)"))
+    if shutil.which("gh") and not miss:
+        bad = identity.check_login(cfg)
+        res.append(("gh login matches github_user", not bad, "; ".join(bad) or cfg.github_user))
+    if not miss:
+        bad = identity.check_worktree(cfg, ".")
+        res.append(("effective git author/committer match config", not bad, "; ".join(bad) or f"{cfg.git_name} <{cfg.git_email}>"))
     res.append(("daily cap within hard max", 0 < cfg.cap <= 2, str(cfg.cap)))
     res.append(("disclosure mode", str(cfg.disclosure).lower() in ("auto", "true", "false"), str(cfg.disclosure)))
     return res

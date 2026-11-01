@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from . import contributing, dedupe, gh, policy, review, safety, vet
+from . import contributing, dedupe, gh, identity, policy, review, safety, vet
 from .config import Config
 from .limiter import DailyLimiter
 from .queue import Item
@@ -34,6 +34,16 @@ def _run(cmd: list[str], cwd: str | None = None) -> str:
 
 def _base(cwd: str) -> str:
     return _run(["git", "merge-base", "HEAD", "origin/HEAD"], cwd)
+
+
+def _identity_gate(cfg: Config, cwd: str, base: str, repo: str, fork: bool) -> None:
+    problems = identity.check_login(cfg) + identity.check_worktree(cfg, cwd, base) + identity.check_upstream(cwd, repo)
+    if fork:
+        problems += identity.check_fork(cfg, cwd, repo)
+    try:
+        identity.require(problems)
+    except identity.IdentityError as e:
+        raise Refused(str(e)) from e
 
 
 def _ensure_signoff(cwd: str) -> None:
@@ -94,6 +104,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
             raise Refused(f"recent commit already touches this: {recent[0]}")
     cwd = str(Path(it.clone))
     base = _base(cwd)
+    _identity_gate(cfg, cwd, base, it.repo, fork=False)
     changed = _run(["git", "diff", "--name-only", f"{base}..HEAD"], cwd).splitlines()
     diff = _run(["git", "diff", f"{base}..HEAD"], cwd)
     bad = safety.check_diff(changed, diff)
@@ -106,11 +117,19 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     conv = contributing.parse(next((t for k, t in files.items() if "CONTRIBUTING" in k), ""))
     if conv.requires_assignment:
         raise Refused("repo requires assignment first: " + "; ".join(conv.notes))
-    if not cfg.signoff:
-        msg = _run(["git", "log", "-1", "--format=%B"], cwd)
-        problems = contributing.commit_message_ok(msg, conv)
-        if problems:
-            raise Refused("commit: " + "; ".join(problems))
+    msg = _run(["git", "log", "-1", "--format=%B"], cwd)
+    signed = bool(_run(["git", "rev-list", "--grep=^Signed-off-by:", f"{base}..HEAD"], cwd))
+    if cfg.signoff_for(it.repo):
+        pass  # sign-off approved for this repo; it is added right before the push
+    elif signed:
+        raise Refused("a commit carries Signed-off-by but sign-off is not approved for this repo; "
+                      f"add {it.repo!r} to signoff_repos after reading its DCO, or remove the trailer")
+    elif conv.dco:
+        raise Refused(f"{it.repo} asks for a DCO Signed-off-by. That is your personal attestation: "
+                      f"read the DCO, then add {it.repo!r} to signoff_repos to approve it for this repo")
+    problems = [p for p in contributing.commit_message_ok(msg, conv) if "Signed-off-by" not in p]
+    if problems:
+        raise Refused("commit: " + "; ".join(problems))
 
 
 def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, execute: bool = False,
@@ -126,8 +145,9 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
     prog = dict(it.submitted)
     add_note, disc = _disclosure(cfg, it.repo)
     note = DISCLOSURE if add_note else ""
-    me = gh.api("user", fresh=True)["login"]
     cwd = str(Path(it.clone))
+    _identity_gate(cfg, cwd, _base(cwd), it.repo, fork=False)  # re-check at the write boundary
+    me = gh.api("user", fresh=True)["login"]
 
     def progress(**kw) -> None:
         prog.update(kw)
@@ -146,8 +166,9 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
         fork = f"https://github.com/{me}/{it.repo.split('/')[1]}.git"
         have = subprocess.run(["git", "remote"], cwd=cwd, capture_output=True, text=True).stdout.split()
         _run(["git", "remote", "set-url" if "fork" in have else "add", "fork", fork], cwd)
-        if cfg.signoff:
+        if cfg.signoff_for(it.repo):
             _ensure_signoff(cwd)
+        _identity_gate(cfg, cwd, _base(cwd), it.repo, fork=True)  # the destination is the operator's own fork
         _run(["git", "push", "-u", "fork", it.branch], cwd)
         progress(fork_pushed=True)
 
