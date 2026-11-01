@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from . import audit as audit_mod
@@ -105,7 +106,9 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd in ("scout", "features"):
         fn = (lambda: scout.scout(cfg, stats, a.language, a.label, a.limit)) if a.cmd == "scout" else \
              (lambda: scout.scout_features(cfg, stats, a.language, a.limit))
-        for c_ in fn():
+        res_ = fn()
+        print("scout:", scout.explain_funnel(scout.LAST_FUNNEL), file=sys.stderr)
+        for c_ in res_:
             print(f"[{c_.verdict.decision:7}] {c_.repo}#{c_.number} score={c_.score:.0f} {c_.title}")
             print(f"          why: {'; '.join(c_.why)}")
             print(f"          {'; '.join(c_.verdict.reasons)}\n          {c_.url}")

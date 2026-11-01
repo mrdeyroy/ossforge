@@ -74,6 +74,22 @@ def build_query(language: str | None, label: str, min_stars: int) -> str:
     return q + f" stars:>={min_stars}"
 
 
+# Why a run returned what it did. Reset by every scout() call; read by the CLI to tell "no matches"
+# from "everything filtered" from "stopped early by a rate limit".
+LAST_FUNNEL: dict = {}
+
+
+def explain_funnel(f: dict) -> str:
+    if f.get("stopped"):
+        return f"STOPPED EARLY: {f['stopped']}. Results so far are partial."
+    if not f.get("fetched"):
+        return "NO MATCHES: the search returned no issues for this query (try another label/language or lower min_stars)."
+    if not f.get("kept"):
+        dropped = {k: f[k] for k in ("spam", "unclear", "skipped", "radar_failed") if f.get(k)}
+        return f"ALL FILTERED: {f['fetched']} issues found, none usable; dropped by stage: {dropped or 'n/a'}."
+    return f"{f['kept']} of {f['fetched']} issues kept ({f['approved']} approved)."
+
+
 def scout(
     cfg: Config,
     stats: Stats | None = None,
@@ -83,28 +99,48 @@ def scout(
     kind: str = "fix",
     skip_repos: set[str] | None = None,
 ) -> list[Candidate]:
-    items = gh.search_issues(build_query(language, label, cfg.min_stars), per_page=limit)
+    f = LAST_FUNNEL
+    f.clear()
+    f.update(fetched=0, spam=0, unclear=0, skipped=0, radar_failed=0, kept=0, approved=0, stopped="")
     scores: dict[str, radar.RepoScore] = {}
     out: list[Candidate] = []
+    try:
+        items = gh.search_issues(build_query(language, label, cfg.min_stars), per_page=limit)
+    except gh.RateLimited as e:
+        f["stopped"] = f"GitHub rate limit while searching ({e}); nothing was fetched"
+        return out
+    f["fetched"] = len(items)
     for it in items:
         # cheap local filters first: they cost no API calls
         if is_spam(it["title"], it.get("body") or "", cfg.spam_keywords):
+            f["spam"] += 1
             continue
         if not vet.clear_requirements(it.get("body") or ""):
+            f["unclear"] += 1
             continue
         repo = it["repository_url"].split("repos/")[1]
         if skip_repos and repo in skip_repos:
+            f["skipped"] += 1
             continue
-        if repo not in scores:
-            try:
-                scores[repo] = radar.analyze(repo)
-            except gh.GhError:
-                continue
-        rs = scores[repo]
-        boost = stats.repo_boost(repo) if stats else 0
-        v = vet.vet_issue(repo, it["number"], repo_ok=rs.score + boost >= cfg.min_repo_score)
+        try:
+            if repo not in scores:
+                try:
+                    scores[repo] = radar.analyze(repo)
+                except gh.RateLimited:
+                    raise
+                except gh.GhError:
+                    f["radar_failed"] += 1
+                    continue
+            rs = scores[repo]
+            boost = stats.repo_boost(repo) if stats else 0
+            v = vet.vet_issue(repo, it["number"], repo_ok=rs.score + boost >= cfg.min_repo_score)
+        except gh.RateLimited as e:
+            f["stopped"] = f"GitHub rate limit while vetting {repo} ({e}); {len(items) - f['kept']} issues not examined"
+            break
         sc, why = score_issue(it, rs.score + boost)
         out.append(Candidate(repo, it["number"], it["title"], it["html_url"], rs.score + boost, v, kind, sc, why))
+        f["kept"] += 1
+        f["approved"] += v.decision == "approve"
     out.sort(key=lambda c: (c.verdict.decision != "approve", -c.score))
     return out
 
@@ -112,8 +148,13 @@ def scout(
 def scout_features(cfg: Config, stats: Stats | None = None, language: str | None = None, limit: int = 15,
                    skip_repos: set[str] | None = None) -> list[Candidate]:
     res: list[Candidate] = []
+    total: dict = {}
     for lb in FEATURE_LABELS[:2]:
         res += scout(cfg, stats, language, lb, limit, kind="feature", skip_repos=skip_repos)
+        for k, v in LAST_FUNNEL.items():
+            total[k] = f"{total[k]}; {v}".strip("; ") if k == "stopped" else total.get(k, 0) + v
+    LAST_FUNNEL.clear()
+    LAST_FUNNEL.update(total)
     seen: set[tuple[str, int]] = set()
     uniq = []
     for c in res:
