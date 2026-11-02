@@ -40,3 +40,16 @@ def test_predictor():
     bad = predictor.PRSignals(None, True, True, True, 40, 2000, False, 100)
     assert predictor.score_pr(good).label == "likely"
     assert predictor.score_pr(bad).label == "unlikely"
+
+
+def test_critique_handles_ghost_or_deleted_user(monkeypatch):
+    monkeypatch.setattr(critique, "signals", lambda repo, number: (
+        {"title": "Fix memory leak", "user": None},
+        predictor.PRSignals("APPROVED", False, False, False, 1, 10, True, 3),
+        [],
+    ))
+    monkeypatch.setattr(critique, "added_line_findings", lambda *a, **k: [])
+    c = critique.critique("owner/repo", 42)
+    assert c.author == "ghost"
+    assert "Hi @ghost," in c.draft
+

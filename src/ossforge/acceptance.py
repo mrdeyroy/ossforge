@@ -69,7 +69,8 @@ def summarize(repo: str, prs: list[dict], now: datetime | None = None, merged_by
     acc.external_closed_unmerged = sum(1 for p in ext if not p.get("merged_at"))
     for i, p in enumerate(x for x in ext if x.get("merged_at")):
         by = merged_by(p) if merged_by and i < MERGER_LOOKUPS else None
-        acc.external_merged.append({"pr": p["number"], "author": p["user"]["login"], "merged_at": p["merged_at"],
+        author = (p.get("user") or {}).get("login", "ghost")
+        acc.external_merged.append({"pr": p["number"], "author": author, "merged_at": p["merged_at"],
                                     "merged_by": by})
     authors = {m["author"] for m in acc.external_merged}
     acc.merger_lookups = min(len(acc.external_merged), MERGER_LOOKUPS)

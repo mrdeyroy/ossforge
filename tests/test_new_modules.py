@@ -77,6 +77,10 @@ def test_patrol_classify():
     comments = [{"user": U("maint"), "body": "please add a test", "html_url": "u"}]
     assert any(a.kind == "feedback" for a in patrol.classify(_pr(), [], [], comments, me))
     assert patrol.classify(_pr(), [], [], [], me)[0].kind == "idle"
+    # Null user from deleted account does not crash and defaults to ghost
+    deleted_user_comments = [{"user": None, "body": "unanswered feedback from deleted user", "html_url": "u"}]
+    actions = patrol.classify(_pr(), [], [], deleted_user_comments, me)
+    assert any(a.kind == "feedback" and "@ghost" in a.detail for a in actions)
 
 
 def test_js_detectors(tmp_path):

@@ -96,7 +96,8 @@ def draft_comment(c: Critique, alternative: str = "") -> str:
 
 def critique(repo: str, number: int) -> Critique:
     pr, sig, files = signals(repo, number)
-    c = Critique(repo, number, pr["title"], pr["user"]["login"], predictor.score_pr(sig))
+    author = (pr.get("user") or {}).get("login", "ghost")
+    c = Critique(repo, number, pr["title"], author, predictor.score_pr(sig))
     c.findings = added_line_findings(repo, pr, files)
     c.draft = draft_comment(c)
     return c
