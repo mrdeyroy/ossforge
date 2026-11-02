@@ -184,3 +184,16 @@ def test_daily_ledger_failed_replace_preserves_used_allowance(tmp_path, monkeypa
     with pytest.raises(OSError):
         limit.record()
     assert p.read_bytes() == before and limit.remaining() == 1
+
+
+def test_daily_ledger_rollover_and_future_date(tmp_path):
+    import json
+    from datetime import timedelta
+    from ossforge import limiter
+    p = tmp_path / 'daily.json'
+    today = limiter.date.today()
+    p.write_text(json.dumps({'day': (today - timedelta(days=1)).isoformat(), 'count': 2}))
+    assert DailyLimiter(p).remaining() == 2
+    p.write_text(json.dumps({'day': (today + timedelta(days=1)).isoformat(), 'count': 2}))
+    with pytest.raises(limiter.InvalidState, match='future'):
+        DailyLimiter(p).remaining()
