@@ -294,6 +294,13 @@ def search_count(q: str) -> int:
     return api("search/issues", q=q, per_page=1)["total_count"]
 
 
+def search_repositories(q: str, per_page: int = 30, sort: str = "stars", fresh: bool = False) -> list[dict]:
+    result = api("search/repositories", fresh=fresh, q=q, per_page=per_page, sort=sort, order="desc")
+    if not isinstance(result, dict):
+        return []
+    return result.get("items", [])
+
+
 def file_text_at(repo: str, path: str, ref: str) -> str | None:
     return file_text(repo, path, ref)
 

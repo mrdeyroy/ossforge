@@ -88,11 +88,11 @@ def score_issue(it: dict, repo_score: int, now: datetime | None = None) -> tuple
     return max(0.0, min(100.0, score)), why
 
 
-def build_query(language: str | None, label: str, min_stars: int) -> str:
+def build_query(language: str | None, label: str, min_stars: int = 0) -> str:
     q = f'is:issue is:open no:assignee archived:false label:"{label}"'
     if language:
         q += f" language:{language}"
-    return q + f" stars:>={min_stars}"
+    return q
 
 
 # Why a run returned what it did. Reset by every scout() call; read by the CLI to tell "no matches"
