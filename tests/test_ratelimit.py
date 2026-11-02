@@ -78,3 +78,85 @@ def test_set_cooldown_never_shortens(tmp_path):
         assert e.value.retry_after > 250
     finally:
         gh.configure(None)
+
+
+def test_inline_retry_publishes_cooldown_before_sleep(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    gh.configure(tmp_path / 'cache')
+    monkeypatch.setattr(gh, 'PACING_S', 0)
+    monkeypatch.setattr(gh, '_budget', lambda path: None)
+    monkeypatch.setattr(gh.subprocess, 'run', lambda *a, **k: SimpleNamespace(
+        returncode=1, stdout='HTTP/2 403\nretry-after: 1\n\n{}', stderr='secondary rate limit'))
+    def sleep(seconds):
+        if seconds:
+            with pytest.raises(gh.RateLimited):
+                gh._guard_cooldown()
+            raise RuntimeError('end controlled sleep')
+    monkeypatch.setattr(gh, '_sleep', sleep)
+    try:
+        with pytest.raises(RuntimeError, match='controlled sleep'):
+            gh.api('search/issues', q='fixture')
+    finally:
+        gh.configure(None)
+
+
+def test_write_reservation_obeys_shared_cooldown(tmp_path):
+    gh.configure(tmp_path / 'cache')
+    try:
+        gh._set_cooldown(120)
+        with pytest.raises(gh.RateLimited):
+            gh.pace_write()
+    finally:
+        gh.configure(None)
+
+
+def test_read_budget_interrupt_keeps_shared_rate_limit_cooldown(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    gh.configure(tmp_path / 'cache')
+    monkeypatch.setattr(gh, 'PACING_S', 0)
+    monkeypatch.setattr(gh, '_budget', lambda path: None)
+    monkeypatch.setattr(gh.subprocess, 'run', lambda *a, **kw: SimpleNamespace(
+        returncode=1, stdout='HTTP/2 403\n\n{}', stderr='secondary rate limit'))
+    try:
+        with gh.read_budget(1), pytest.raises(gh.ReadBudgetExceeded):
+            gh.api('search/issues', q='fixture')
+        with pytest.raises(gh.RateLimited):
+            gh._guard_cooldown()
+    finally:
+        gh.configure(None)
+
+
+def test_retry_rechecks_a_longer_cooldown_from_another_process(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    gh.configure(tmp_path / 'cache')
+    monkeypatch.setattr(gh, 'PACING_S', 0)
+    monkeypatch.setattr(gh, '_budget', lambda path: None)
+    calls = []
+    def read(*a, **kw):
+        calls.append(1)
+        return SimpleNamespace(returncode=1, stdout='HTTP/2 403\nretry-after: 1\n\n{}', stderr='secondary rate limit')
+    monkeypatch.setattr(gh.subprocess, 'run', read)
+    monkeypatch.setattr(gh, '_sleep', lambda seconds: gh._set_cooldown(300) if seconds else None)
+    try:
+        with pytest.raises(gh.RateLimited):
+            gh.api('search/issues', q='fixture')
+        assert len(calls) == 1
+    finally:
+        gh.configure(None)
+
+
+def test_post_response_pacing_cannot_hide_rate_limit_headers(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    gh.configure(tmp_path / 'cache')
+    monkeypatch.setattr(gh, '_budget', lambda path: None)
+    monkeypatch.setattr(gh.subprocess, 'run', lambda *a, **kw: SimpleNamespace(
+        returncode=1, stdout='HTTP/2 403\nretry-after: 120\n\n{}', stderr='secondary rate limit'))
+    monkeypatch.setattr(gh, '_sleep', lambda seconds: (_ for _ in ()).throw(gh.ReadBudgetExceeded('controlled pacing deadline')))
+    try:
+        with pytest.raises(gh.RateLimited):
+            gh.api('search/issues', q='fixture')
+        with pytest.raises(gh.RateLimited) as exc:
+            gh._guard_cooldown()
+        assert exc.value.retry_after > 100
+    finally:
+        gh.configure(None)

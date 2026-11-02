@@ -191,11 +191,14 @@ def pace_write() -> float:
     """Call before every mutating request (issue, fork, push, PR, comment). Shared across processes.
 
     Returns the reservation timestamp recorded under the lock; consecutive reservations are >= WRITE_GAP_S apart."""
+    _guard_cooldown()
     with _shared_lock() as d:
+        _guard_cooldown()
         g = _load_gates(d)
         gap = WRITE_GAP_S - (time.time() - g.get("last_write", 0.0))
         if gap > 0:
             _sleep(gap)
+        _guard_cooldown()
         g["last_write"] = reserved = time.time()
         _save_gates(d, g)
     return reserved
@@ -244,26 +247,29 @@ def api(path: str, /, *, fresh: bool = False, **params: Any) -> Any:
     for k, v in params.items():
         cmd += ["-f", f"{k}={v}"]
     for attempt in range(MAX_RETRIES + 1):
+        _guard_cooldown()
         _budget(path)
+        _guard_cooldown()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=min(120, read_remaining()))
         except subprocess.TimeoutExpired as exc:
             read_remaining()
             raise GhError("GitHub API read timed out after 120 seconds; retry later") from exc
-        _sleep(PACING_S)
         headers, body = split_response(p.stdout)
         if p.returncode == 0:
+            _sleep(PACING_S)
             data = json.loads(body) if body.strip() else None
             break
         err = (p.stderr.strip() + "\n" + body[:300]).strip()
         status = status_of(headers, err)
         if is_rate_limited(status, headers, err):
             wait = retry_wait(headers, attempt)
+            _set_cooldown(wait)  # publish immediately, including when inline sleep/budget is interrupted
             if attempt < MAX_RETRIES and wait <= MAX_INLINE_WAIT:
                 _sleep(wait)  # documented behaviour: honour Retry-After / reset, then try again
                 continue
-            _set_cooldown(wait)
             raise RateLimited(f"{err.splitlines()[0] if err else 'rate limited'} (retry in ~{int(wait)}s)", status, wait)
+        _sleep(PACING_S)
         raise GhError(err or "gh api failed", status)
     if cp and data is not None:
         cp.parent.mkdir(parents=True, exist_ok=True)
