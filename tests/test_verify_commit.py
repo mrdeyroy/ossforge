@@ -70,3 +70,79 @@ def test_verify_refuses_dirty_tree_before_commands(tmp_path, monkeypatch):
     (r / 'm.py').write_text('changed\n')
     res = verify.verify_fix(r, base, Path('python3'), ['test_m.py'])
     assert not res.ok and not res.evidence and 'dirty' in res.log[0]
+
+
+def test_native_node_verification_and_receipt(tmp_path, monkeypatch):
+    import shutil
+    import sys
+    import pytest
+    if not shutil.which('node'):
+        pytest.skip('node unavailable')
+    r = _repo(tmp_path, monkeypatch)
+    (r / 'm.js').write_text('module.exports = 1;\n')
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'js base')
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'm.js').write_text('module.exports = 2;\n')
+    (r / 'test_m.js').write_text("require('node:assert/strict').equal(require('./m'), 2);\n")
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'js fix')
+    result = verify.verify_fix(r, base, Path(sys.executable), [], test_command=['node', 'test_m.js'],
+                               check_commands=[['node', '--check', 'm.js']])
+    assert result.ok and result.evidence['commands'] == [['node', 'test_m.js'], ['node', '--check', 'm.js']]
+    assert (r / 'm.js').read_text() == 'module.exports = 2;\n'
+
+
+def test_collection_error_is_not_failing_regression(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'm.py').write_text('value = 2\n')
+    (r / 'test_m.py').write_text('def test_x():\n    assert True\n')
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'fix')
+    calls = iter([(2, 'collection error'), (0, 'pass'), (0, 'lint')])
+    original = verify._run
+    monkeypatch.setattr(verify, '_run', lambda cmd, *a, **k: original(cmd, *a, **k) if cmd[0] == 'git' else next(calls))
+    monkeypatch.setattr(verify, 'changed_files', lambda *a: ['m.py', 'test_m.py'])
+    assert not verify.verify_fix(r, base, Path(sys.executable), ['test_m.py']).ok
+
+
+def test_native_missing_command_refuses_and_restores(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'm.py').write_text('value = 2\n')
+    (r / 'test_m.py').write_text('def test_x():\n    assert True\n')
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'fix')
+    res = verify.verify_fix(r, base, Path(sys.executable), [], test_command=['nonexistent-ossforge-command'])
+    assert not res.ok and not res.evidence
+    assert (r / 'm.py').read_text() == 'value = 2\n'
+    assert not sh(r, 'git', 'status', '--porcelain')
+
+
+def test_cli_native_mode_does_not_pip_install(tmp_path, monkeypatch, capsys):
+    from ossforge import cli, queue, submit
+    cfg = tmp_path / 'config.yaml'
+    cfg.write_text(f'state_dir: {tmp_path}/state\n')
+    q = queue.Queue(tmp_path / 'state' / 'queue.json')
+    q.add(queue.Item('x', 'org/lib', 'a.js', 1, 'bug', 'd', clone=str(tmp_path)))
+    q.save()
+    body = tmp_path / 'body.md'
+    body.write_text('details')
+    monkeypatch.setattr(verify, 'venv_python', lambda *a: (_ for _ in ()).throw(AssertionError('no pip mode')))
+    monkeypatch.setattr(submit, '_run', lambda *a: 'base')
+    seen = []
+    def fake(*a, **kw):
+        seen.append(kw)
+        return verify.VerifyResult(True, True, True, ['a.js'], ['test_a.js'], evidence={'schema': 1})
+    monkeypatch.setattr(verify, 'verify_fix', fake)
+    args = ['--config', str(cfg), 'verify', 'x', '--branch', 'fix', '--test-command', 'node --test test_a.js',
+            '--check-command', 'node --check a.js', '--issue-title', 't', '--pr-title', 't',
+            '--issue-body-file', str(body), '--pr-body-file', str(body)]
+    assert cli.main(args) == 0
+    assert seen[0]['test_command'] == ['node', '--test', 'test_a.js']
+    assert seen[0]['check_commands'] == [['node', '--check', 'a.js']]
+    assert queue.Queue(q.path).items['x'].verification == {'schema': 1}
+    assert 'verified: x' in capsys.readouterr().out
