@@ -34,6 +34,17 @@ def clone(cfg: Config, repo: str) -> Path:
                                capture_output=True, text=True, timeout=30)
         if probe.returncode or Path(probe.stdout.strip()).resolve() != dest.resolve():
             raise RuntimeError("existing checkout is not the target Git root; preserve it and inspect before retry")
+        index = subprocess.run(["git", "rev-parse", "--git-path", "index"], cwd=dest,
+                               capture_output=True, text=True, timeout=30)
+        index_path = Path(index.stdout.strip())
+        if not index_path.is_absolute():
+            index_path = dest / index_path
+        if index.returncode or not index.stdout.strip() or not index_path.is_file():
+            raise RuntimeError("existing checkout index missing; preserve incomplete checkout and inspect before retry")
+        changes = subprocess.run(["git", "status", "--porcelain"], cwd=dest,
+                                 capture_output=True, text=True, timeout=30)
+        if changes.returncode or changes.stdout.strip():
+            raise RuntimeError("existing checkout is dirty or incomplete; preserve it and inspect before retry")
         problems = identity.check_upstream(str(dest), repo)
         if problems:
             raise RuntimeError("; ".join(problems) + "; existing checkout preserved")
