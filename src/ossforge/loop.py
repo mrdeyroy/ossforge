@@ -12,7 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import discovery, digest, gh, hunt, patrol, safety, scout, submit, runs
+from . import discovery, digest, gh, hunt, patrol, safety, scout, submit, runs, vet, radar
 from .config import Config
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -77,10 +77,33 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
     repos: list[str] = []
     issues: list[scout.Candidate] = []
     feats: list[scout.Candidate] = []
+    # Persisted leads are not approvals. Recover them before another search,
+    # rechecking current health/discussion/policy before any clone attempt.
+    pending = [i for i in q.by_status("found") if i.kind == "issue" and i.source_issue and not i.clone]
+    with gh.read_budget(cfg.discovery_read_budget_seconds):
+        for item in pending[:MAX_REPOS_PER_PASS]:
+            try:
+                health = radar.analyze(item.repo)
+                verdict = vet.vet_issue(item.repo, item.source_issue, repo_ok=health.score >= cfg.min_repo_score)
+            except (gh.RateLimited, gh.ReadBudgetExceeded) as exc:
+                notes.run.data["outcome"] = "discovery_budget_exhausted"
+                notes.append(f"issue recovery stopped: {exc}; leads preserved")
+                break
+            except (gh.GhError, OSError) as exc:
+                notes.append(f"issue recovery {item.id}: current review unavailable ({exc}); preserved")
+                continue
+            if verdict.decision != "approve":
+                q.set(item.id, status="held", hold_reason="current recovery review: " + "; ".join(verdict.reasons))
+                q.save()
+                continue
+            issues.append(scout.Candidate(item.repo, item.source_issue, item.detail,
+                                          item.notes[0] if item.notes else "", health.score, verdict, score=item.rank))
+            if item.repo not in repos:
+                repos.append(item.repo)
     day = int(time.time() // 86400)
     try:
         with gh.read_budget(cfg.discovery_read_budget_seconds):
-            for lang in cfg.languages:
+            for lang in ([] if pending else cfg.languages):
                 # one label per pass (rotating) keeps the request burst small; features alternate days
                 label = cfg.labels[day % len(cfg.labels)]
                 notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
@@ -103,6 +126,12 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
         notes.append(f"discovery stopped: {exc}")
     notes.append(f"scout: {len(repos)} healthy, open-to-AI repo(s) with approved issues")
 
+    # Save all issue identities before the first potentially slow clone. A
+    # stopped process must not lose the successfully discovered work leads.
+    for c in issues:
+        q.add(Item(f"{c.repo}#{c.number}:issue", c.repo, "", c.number, "issue", c.title,
+                   status="found", work="fix", rank=c.score, notes=[c.url], source_issue=c.number))
+    q.save()
     for repo in repos[:MAX_REPOS_PER_PASS]:
         # A vetted issue is already a work lead. Do not block its handoff on an
         # unrelated full-tree static hunt and its separate duplicate searches.
@@ -113,13 +142,18 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
             notes.append(f"issue work {repo}: checkout unavailable; inspect before retry ({exc})")
             continue
         if pol.anti_ai:
+            for c in (item for item in issues if item.repo == repo):
+                item = q.items[f"{c.repo}#{c.number}:issue"]
+                if item.status == "found" and not item.clone:
+                    q.set(item.id, status="held", hold_reason=f"local anti-AI policy in {pol.source}")
+            q.save()
             notes.append(f"issue work {repo}: skipped (anti-AI in {pol.source})")
             continue
         for c in (item for item in issues if item.repo == repo):
             # Search/vet approval is only a work lead, not verified correctness.
-            q.add(Item(f"{c.repo}#{c.number}:issue", c.repo, "", c.number, "issue", c.title,
-                       status="clean", clone=str(clone), work="fix", rank=c.score,
-                       notes=[c.url], source_issue=c.number))
+            item = q.items[f"{c.repo}#{c.number}:issue"]
+            if item.status == "found" and not item.clone:
+                q.set(item.id, status="clean", clone=str(clone))
         q.save()  # preserve each successful handoff before the next clone
         notes.append(f"issue work {repo}: handed off to driver; source issues must be rechecked before coding")
     for c in feats[:3]:
