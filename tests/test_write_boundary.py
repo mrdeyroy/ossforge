@@ -8,7 +8,7 @@ import textwrap
 
 import pytest
 
-from ossforge import gh, policy_review, queue, safety, submit
+from ossforge import evidence, gh, policy_review, queue, safety, submit
 from ossforge.config import Config
 from ossforge.limiter import DailyLimiter
 
@@ -91,6 +91,7 @@ def world(tmp_path, monkeypatch):
                  git_name=ME[0], git_email=ME[1])
     it = queue.Item("a", "acme/lib", "a.py", 1, "k", "d", status="verified", issue_title="t", issue_body="b",
                     pr_title="fix: x", pr_body="b", branch="fix/x", clone=str(clone))
+    it.verification = evidence.capture(clone, sh("git", "merge-base", "HEAD", "origin/HEAD", cwd=clone), [["fixture-test"]])
     policy_review.record(cfg, "acme/lib", {"docs": [], "scanned_locations": []}, "test: no restrictions")
     return dict(cfg=cfg, it=it, clone=clone, log=log, up=up, fork=fork, tmp=tmp_path, mp=monkeypatch,
                 lim=DailyLimiter(tmp_path / "d.json", 2), audit=safety.Audit(tmp_path / "audit.jsonl"))
@@ -228,3 +229,44 @@ def test_changed_policy_doc_invalidates_review(world, monkeypatch):
     with pytest.raises(submit.Refused, match="changed since the review"):
         run(world, execute=True)
     assert writes(world["log"]) == []
+
+
+def test_source_change_after_verification_is_refused(world):
+    clone = world['clone']
+    (clone / 'a.py').write_text('x = 999\n')
+    sh('git', 'add', '-A', cwd=clone)
+    sh('git', 'commit', '-qm', 'fix: altered after testing', cwd=clone)
+    with pytest.raises(submit.Refused, match='verification evidence'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+
+
+def test_missing_receipt_and_dirty_state_refused(world):
+    receipt = world['it'].verification
+    world['it'].verification = {}
+    with pytest.raises(submit.Refused, match='verification evidence missing'):
+        run(world, execute=True)
+    world['it'].verification = receipt
+    (world['clone'] / 'a.py').write_text('x = 22\n')
+    with pytest.raises(submit.Refused, match='work tree is dirty'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+
+
+def test_changed_branch_refused(world):
+    world['it'].branch = 'untested-branch'
+    with pytest.raises(submit.Refused, match='verification evidence'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+
+
+def test_message_only_rewrite_keeps_evidence(world):
+    sh('git', 'commit', '--amend', '-qm', 'fix: same tested content', cwd=world['clone'])
+    assert run(world)['dry_run']
+
+
+def test_changed_base_invalidates_receipt(world):
+    world['it'].verification['base'] = '0' * 40
+    with pytest.raises(submit.Refused, match='verification evidence'):
+        run(world, execute=True)
+    assert writes(world['log']) == []

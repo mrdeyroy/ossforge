@@ -295,3 +295,19 @@ Skill terms add a small, bounded ranking bonus for word-boundary matches in the
 issue title/body and show the matched terms. They never waive a gate and are not
 proof of difficulty, implementation fit or maintainer acceptance. No model or API
 key is required. Affinity means where to look, never permission to publish.
+
+### Verification receipt and stale-change protection
+
+`verify` now records the exact tested Git tree, merge-base SHA, active branch and
+command in the queue. Both test runs require a clean working tree; a changed tree
+or branch during testing cannot earn a receipt. `submit` checks the receipt in its
+dry run and again at the write boundary and before pushing. A source/test commit,
+branch switch, dirty work tree or changed merge base requires verification again.
+The requested PR branch must be the tested active branch. A message-only rewrite
+(such as an explicitly approved DCO signoff) may preserve the identical tree and
+base, so it does not invalidate the source-level proof.
+
+Existing queue items that only have `status: verified` but no receipt must be
+verified again. The receipt prevents stale test evidence being reused for a
+changed patch. It is local state, not a signature, remote attestation, protection
+against local-state tampering, or a guarantee that the test proves the right bug.

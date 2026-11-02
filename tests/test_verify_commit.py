@@ -62,3 +62,11 @@ def test_commit_gate_and_artifacts_not_staged(tmp_path, monkeypatch):
     identity.commit(cfg, str(r), "fix: f")
     assert sh(r, "git", "log", "-1", "--format=%an|%ae|%cn|%ce") == "Owner|o@example.invalid|Owner|o@example.invalid"
     assert "egg-info" not in sh(r, "git", "show", "--stat", "--format=", "HEAD")
+
+
+def test_verify_refuses_dirty_tree_before_commands(tmp_path, monkeypatch):
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'm.py').write_text('changed\n')
+    res = verify.verify_fix(r, base, Path('python3'), ['test_m.py'])
+    assert not res.ok and not res.evidence and 'dirty' in res.log[0]

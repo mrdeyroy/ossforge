@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import predictor
+from . import evidence, predictor
 
 SAFE_ENV_KEYS = ("PATH", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE", "LANG", "PYTHONIOENCODING")
 
@@ -64,6 +64,7 @@ class VerifyResult:
     fix_files: list[str] = field(default_factory=list)
     test_files: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    evidence: dict = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -74,6 +75,11 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
     """The branch at HEAD holds fix + test. Revert only the non-test files to base, expect failure,
     restore, expect success, then lint the touched files."""
     r = VerifyResult()
+    try:
+        initial = evidence.capture(clone, base, [])
+    except evidence.StaleEvidence as e:
+        r.log.append(str(e))
+        return r
     files = changed_files(clone, base)
     r.test_files = [f for f in files if predictor.is_test_path(f)]
     r.fix_files = [f for f in files if not predictor.is_test_path(f)]
@@ -116,4 +122,12 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
         rc, out = _run([str(py), "-m", "ruff", "check", *pyfiles], clone, 120)
         r.lint_ok = rc == 0
         r.log.append(f"ruff rc={rc}: {out[-200:]}")
+    if r.ok:
+        try:
+            r.evidence = evidence.capture(clone, base, [pytest])
+            if any(initial[k] != r.evidence[k] for k in ("base", "tree", "branch")):
+                raise evidence.StaleEvidence("verification evidence: git state changed during tests; re-run verify")
+        except evidence.StaleEvidence as e:
+            r.passed_with_fix = False
+            r.log.append(str(e))
     return r

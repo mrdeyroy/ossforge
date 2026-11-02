@@ -28,6 +28,7 @@ class Item:
     issue_body: str = ""
     pr_title: str = ""
     pr_body: str = ""
+    verification: dict = field(default_factory=dict)  # exact tested tree/base/branch and commands
     submitted: dict = field(default_factory=dict)  # partial progress lives here (issue_url, fork_pushed, pr_url)
     work: str = "fix"  # fix | feature
     rank: float = 0.0
