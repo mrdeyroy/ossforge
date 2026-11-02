@@ -12,12 +12,21 @@ def test_inactive_repo_costs_no_search_calls(monkeypatch):
 
 def test_active_repo_uses_three_searches_not_four(monkeypatch):
     n = {"search": 0}
+    queries = []
     monkeypatch.setattr(gh, "api", lambda path, **k: {"pushed_at": "2999-01-01T00:00:00Z", "stargazers_count": 900})
 
     def page(q, **k):
         n["search"] += 1
         return {"total_count": 10, "items": []}
     monkeypatch.setattr(gh, "search_page", page)
-    monkeypatch.setattr(gh, "search_count", lambda q, **k: n.__setitem__("search", n["search"] + 1) or 2)
+
+    def count(q, **k):
+        queries.append(q)
+        n["search"] += 1
+        return 2
+
+    monkeypatch.setattr(gh, "search_count", count)
     radar._analyze("o/r", 90, 14)
     assert n["search"] == 3
+    assert any("updated:<" in q for q in queries)
+    assert not any("created:<" in q for q in queries)

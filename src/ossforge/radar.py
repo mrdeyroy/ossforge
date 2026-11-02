@@ -141,7 +141,7 @@ def _analyze(repo: str, days: int, stale_days: int) -> RepoScore:
     page = gh.search_page(merged_q, per_page=20)
     merged = page["total_count"]
     open_n = gh.search_count(f"repo:{repo} is:pr is:open")
-    stale_n = gh.search_count(f"repo:{repo} is:pr is:open created:<{stale}")
+    stale_n = gh.search_count(f"repo:{repo} is:pr is:open updated:<{stale}")
     sample = page["items"]
     md = [d for d in (_days(i.get("created_at"), i.get("closed_at")) for i in sample) if d is not None]
     ext = [i for i in sample if i.get("author_association") not in ("OWNER", "MEMBER", "COLLABORATOR")]
