@@ -90,3 +90,9 @@ returns `discovery_incomplete` (nonzero CLI exit), not a successful `no_work`.
 The reason names the discovery stop. It consumes no driver attempt and starts no
 model. An already queued candidate can still be processed with normal checks;
 partial discovery is not proof that no useful opportunity exists.
+
+Task creation checks that the candidate checkout is committed and on a named
+branch before launching a driver or reserving an attempt. Dirty/detached work
+stops for inspection instead of asking a new driver to overwrite it. The
+contract still does not isolate a driver from the filesystem or verify that a
+clean candidate is a genuine bug.

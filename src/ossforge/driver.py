@@ -22,6 +22,7 @@ def task(queue: Queue, item_id: str | None = None) -> dict:
         return {'schema': 1, 'status': 'no_work', 'reason': 'no clean cloned candidate; run discovery/hunt or review the queue'}
     clone = Path(item.clone)
     base = submit._base(str(clone))
+    evidence.capture(clone, base, [])  # refuse dirty/detached candidates before spending a driver attempt
     return {'schema': 1, 'status': 'ready', 'id': item.id, 'repo': item.repo,
             'clone': str(clone.resolve()), 'base': base, 'candidate': item.detail,
             'path': item.path, 'line': item.line, 'notes': item.notes, 'source_issue': item.source_issue,

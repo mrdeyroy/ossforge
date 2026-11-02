@@ -281,7 +281,11 @@ def main(argv: list[str] | None = None) -> int:
         emit(result)
         return 0 if result["status"] in ("no_work", "verified_not_submitted", "submitted") else 1
     elif a.cmd == "agent-task":
-        emit(driver.task(q, a.item))
+        try:
+            emit(driver.task(q, a.item))
+        except (OSError, evidence.StaleEvidence, submit.Refused) as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 1
     elif a.cmd == "agent-verify":
         try:
             result = driver.complete(q, driver.parse(Path(a.result_file)))

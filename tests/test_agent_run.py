@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -93,4 +94,15 @@ def test_partial_discovery_without_candidate_is_incomplete_not_no_work(tmp_path,
     monkeypatch.setattr(agent_run.loop, '_run_once', partial)
     out = agent_run.run(cfg, ['must-not-start'])
     assert out['status'] == 'discovery_incomplete'
+    assert not cfg.path('driver-attempts.json').exists()
+
+
+def test_dirty_candidate_refuses_before_driver_attempt_or_launch(tmp_path, monkeypatch):
+    from ossforge import evidence
+    cfg, command = fixture(tmp_path)
+    q = Queue(cfg.path('queue.json'))
+    (Path(q.items['a'].clone) / 'calc.py').write_text('uncommitted user work\n')
+    monkeypatch.setattr(agent_run, 'invoke', lambda *a: pytest.fail('dirty checkout must not launch driver'))
+    with pytest.raises(evidence.StaleEvidence, match='dirty'):
+        agent_run.run(cfg, command, discover=False)
     assert not cfg.path('driver-attempts.json').exists()
