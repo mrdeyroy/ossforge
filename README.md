@@ -457,3 +457,12 @@ File coverage comes from every non-test path in the actual committed patch, not
 only the detector's original location (issue leads may have no original path).
 Changes over10 source paths stop for separate review rather than silently
 checking only a subset.
+
+Publication also compares the live upstream default tip with the clone's saved
+`origin/HEAD` and patch merge base. A moved/unavailable tip stops publication
+before writes and again before PR creation. It never resets, rebases or discards
+an active checkout automatically. Fetch, inspect/rebase the patch, resolve any
+conflict and rerun verification; fetching alone does not make old test evidence
+current. A completed saved PR can still be recovered without new writes. This
+conservative rule can require retesting even after an unrelated upstream change;
+it cannot eliminate a change racing immediately after the final read.
