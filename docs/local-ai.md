@@ -84,3 +84,9 @@ before retry; dirty work prevents trusted verification. The runner does not
 provision containers, hide home-directory credentials or isolate a malicious
 assistant/repository. Use trusted commands and separately prepared isolation.
 No real external-model autonomous contribution has yet been validated.
+
+If discovery stops early and there is no usable queued candidate, `agent-run`
+returns `discovery_incomplete` (nonzero CLI exit), not a successful `no_work`.
+The reason names the discovery stop. It consumes no driver attempt and starts no
+model. An already queued candidate can still be processed with normal checks;
+partial discovery is not proof that no useful opportunity exists.
