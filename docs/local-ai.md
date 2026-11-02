@@ -49,3 +49,38 @@ assistant and repository processes with filesystem/account access can bypass or
 alter local state. This contract is not a signed attestation or credential boundary.
 The current hook and CLI do not provide automated model retry, accounting,
 container provisioning, fixed whole-run deadline or robust arbitrary check setup.
+
+## Optional bounded local command runner
+
+`ossforge agent-run --command '/absolute/path/to/your-driver'` runs one discovery
+pass, assigns at most one clean cloned candidate, invokes an operator-provided
+local driver without a shell, validates its result and reruns verification. It
+retains a verified patch without publishing by default. `--publish` explicitly
+opts into the existing submit path and its gates, only with owner authorization.
+`--skip-discovery` works from the current queue, including a verified item waiting
+for submission. This is one bounded invocation, not an always-on daemon.
+
+The driver receives `OSSFORGE_TASK_FILE` and `OSSFORGE_RESULT_FILE`, absolute paths
+to schema-1 JSON. It reads the former, performs permitted local work, then writes
+the latter. Invocation uses the clone as working directory. Environment variables
+are scrubbed; provider and GitHub tokens are not forwarded. Driver stdout/stderr
+are discarded, so progress should be written to operator-owned local logs without
+secrets. A wrapper must deliberately handle its assistant's normal local auth and
+permissions. No Claude-specific wrapper or user's installed driver has been
+validated here; do not copy subscription tokens into this interface.
+
+`--timeout` defaults to 900 seconds and allows 1..3600; the driver process group is
+killed on timeout. This is not a whole-run deadline: discovery, verification and
+publication have their own operations. `--daily-attempts` defaults to 2, allows
+1..20 and reserves an attempt before launching, including failed/crashed launches.
+The counter uses the host's local date and the chosen state directory. It is not a
+money/token cap, security control or global account quota. Choosing a higher value
+or another state directory changes that limit. Persist the state directory.
+
+A verified queued patch is resumed without rerunning the driver. Refused submit
+keeps it verified and retains any remote progress saved by the submit path. An
+interrupted unverified checkout is not reset or blindly rewritten: inspect it
+before retry; dirty work prevents trusted verification. The runner does not
+provision containers, hide home-directory credentials or isolate a malicious
+assistant/repository. Use trusted commands and separately prepared isolation.
+No real external-model autonomous contribution has yet been validated.
