@@ -46,3 +46,33 @@ def test_hold_cannot_hide_verified_or_partial_work(tmp_path):
         assert cli.main(['--config', str(cfg), 'hold', item, '--reason', 'pause']) == 1
     assert Queue(q.path).items['verified'].status == 'verified'
     assert Queue(q.path).items['partial'].submitted == {'issue_url': 'saved'}
+
+
+def test_uncloned_issue_can_be_held_and_resumes_as_found(tmp_path):
+    import yaml
+    cfgfile = tmp_path/'c.yaml'
+    cfgfile.write_text(yaml.safe_dump({'state_dir': str(tmp_path/'state')}))
+    cfg = Config(state_dir=str(tmp_path/'state'))
+    q = Queue(cfg.path('queue.json'))
+    q.add(Item('org/lib#7:issue', 'org/lib', '', 7, 'issue', 'lead', source_issue=7))
+    q.save()
+    assert cli.main(['--config', str(cfgfile), 'hold', 'org/lib#7:issue', '--reason', 'incomplete checkout preserved']) == 0
+    saved = Queue(cfg.path('queue.json'))
+    assert saved.items['org/lib#7:issue'].status == 'held'
+    assert agent_next.next_step(cfg, saved, str(cfgfile))['status'] == 'held_work'
+    assert cli.main(['--config', str(cfgfile), 'unhold', 'org/lib#7:issue']) == 0
+    item = Queue(cfg.path('queue.json')).items['org/lib#7:issue']
+    assert item.status == 'found' and not item.clone and not item.verification
+    assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), str(cfgfile))['status'] == 'recover_issue_handoff'
+
+
+def test_hold_does_not_admit_unrelated_found_items(tmp_path):
+    cfgfile = tmp_path/'c.yaml'
+    cfgfile.write_text(f'state_dir: {tmp_path}/state\n')
+    q = Queue(tmp_path/'state'/'queue.json')
+    q.add(Item('static', 'org/lib', 'x.py', 1, 'bug', 'unreviewed'))
+    q.add(Item('partial', 'org/lib', '', 7, 'issue', 'lead', source_issue=7, submitted={'fork_pushed': True}))
+    q.save()
+    for item in ('static', 'partial'):
+        assert cli.main(['--config', str(cfgfile), 'hold', item, '--reason', 'pause']) == 1
+    assert all(i.status == 'found' for i in Queue(q.path).items.values())

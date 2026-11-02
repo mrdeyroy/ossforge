@@ -382,11 +382,14 @@ def main(argv: list[str] | None = None) -> int:
         print("verified:", a.id)
     elif a.cmd in ("hold", "unhold"):
         it = q.items.get(a.id)
-        expected = "clean" if a.cmd == "hold" else "held"
-        if not it or it.status != expected or it.submitted or (a.cmd == "hold" and not a.reason.strip()):
+        pending_issue = bool(it and it.status == "found" and it.kind == "issue" and it.source_issue and not it.clone)
+        expected = "clean or uncloned issue lead" if a.cmd == "hold" else "held"
+        allowed = bool(it and (it.status == "clean" or pending_issue)) if a.cmd == "hold" else bool(it and it.status == "held")
+        if not allowed or it.submitted or (a.cmd == "hold" and not a.reason.strip()):
             print(f"REFUSED: {a.cmd} requires {expected} work without publication progress and a nonempty hold reason", file=sys.stderr)
             return 1
-        q.set(a.id, status="held" if a.cmd == "hold" else "clean",
+        resumed = "found" if it.kind == "issue" and it.source_issue and not it.clone else "clean"
+        q.set(a.id, status="held" if a.cmd == "hold" else resumed,
               hold_reason=a.reason.strip() if a.cmd == "hold" else "")
         q.save()
         print(f"{a.cmd}: {a.id}")
