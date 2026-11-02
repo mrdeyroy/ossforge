@@ -7,6 +7,11 @@ from dataclasses import dataclass
 
 from . import gh
 
+
+class Incomplete(RuntimeError):
+    """Publication evidence could not be established, not an empty result."""
+
+
 STOP = {"the", "a", "an", "in", "of", "to", "is", "for", "and", "or", "on", "with", "when", "not", "be", "fix", "bug", "py"}
 
 
@@ -35,7 +40,7 @@ class Match:
     reason: str
 
 
-def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str], threshold: float = 0.25) -> list[Match]:
+def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str], threshold: float = 0.25, *, strict: bool = False) -> list[Match]:
     """Searches by file path, symbols, and title keywords; scores each hit locally."""
     queries = [f'repo:{repo} "{path}"']
     queries += [f"repo:{repo} {s}" for s in symbols[:3] if s]
@@ -44,8 +49,12 @@ def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str]
     probe = f"{title}\n{body}"
     for q in queries:
         try:
-            items = gh.search_issues(q, per_page=20)
-        except gh.GhError:
+            items = gh.search_issues(q, per_page=100 if strict else 20, fresh=strict, require_complete=strict)
+            if strict and len(items) >= 100:
+                raise Incomplete("duplicate search reached its result limit; narrow and review before publication")
+        except gh.GhError as exc:
+            if strict:
+                raise Incomplete("duplicate search unavailable; cannot establish no competing work") from exc
             continue
         for it in items:
             n = it["number"]
@@ -55,7 +64,7 @@ def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str]
             sc = similarity(probe, hay)
             # A bare file-name mention only counts when the text is at least loosely related;
             # otherwise an unrelated docs issue would block a real finding.
-            mentions_path = path in hay and sc >= 0.08
+            mentions_path = bool(path) and path in hay and sc >= 0.08
             if mentions_path:
                 sc = max(sc, threshold)
             if sc >= threshold:
@@ -66,16 +75,20 @@ def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str]
     return sorted(seen.values(), key=lambda m: -m.score)
 
 
-def recent_commit_hits(repo: str, path: str, keywords: list[str], days: int = 45) -> list[str]:
+def recent_commit_hits(repo: str, path: str, keywords: list[str], days: int = 45, *, strict: bool = False) -> list[str]:
     """Commits touching `path` recently whose message shares keywords with the finding:
     someone may already have fixed it on main."""
     from datetime import datetime, timedelta, timezone
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        commits = gh.api(f"repos/{repo}/commits", path=path, since=since, per_page=20) or []
-    except gh.GhError:
+        commits = gh.api(f"repos/{repo}/commits", path=path, since=since, per_page=100 if strict else 20, fresh=strict) or []
+    except gh.GhError as exc:
+        if strict:
+            raise Incomplete("recent commit check unavailable") from exc
         return []
+    if strict and len(commits) >= 100:
+        raise Incomplete("recent commit sample saturated; review a narrower change history")
     kw = {k.lower() for k in keywords}
     return [c["html_url"] for c in commits if kw & tokens(c["commit"]["message"])]
 

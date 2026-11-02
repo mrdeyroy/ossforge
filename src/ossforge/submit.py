@@ -96,6 +96,57 @@ def cla_status(repo: str, pr: int) -> str:
     return ""
 
 
+def _source_work_gate(it: Item) -> None:
+    if it.submitted.get("pr_url"):
+        return
+    number = it.source_issue
+    saved = it.submitted.get("issue_url", "")
+    if not number and saved:
+        prefix = f"https://github.com/{it.repo}/issues/"
+        suffix = saved.removeprefix(prefix)
+        if not saved.startswith(prefix) or not suffix.isdigit():
+            raise Refused("saved issue URL is not an exact issue in the target repository")
+        number = int(suffix)
+    if not number:
+        return
+    try:
+        source = gh.api(f"repos/{it.repo}/issues/{number}", fresh=True)
+        if source.get("state") != "open" or "pull_request" in source:
+            raise Refused("source issue is closed or is a pull request; reconsider the candidate")
+        if source.get("html_url") != f"https://github.com/{it.repo}/issues/{number}":
+            raise Refused("source issue URL does not match the target")
+        comments = gh.api(f"repos/{it.repo}/issues/{number}/comments", per_page=100, fresh=True) or []
+        timeline = gh.api(f"repos/{it.repo}/issues/{number}/timeline", per_page=100, fresh=True) or []
+        refs = gh.search_issues(f"repo:{it.repo} is:pr #{number} in:body,title", per_page=100, fresh=True, require_complete=True)
+        if any(len(rows) >= 100 for rows in (comments, timeline, refs)):
+            raise Refused("source activity sample saturated; review complete activity before publication")
+        if source.get("assignees") or any(vet.comment_claims_issue(c.get("body", "")) for c in comments):
+            raise Refused("source issue assigned or claimed; review active work before publication")
+        linked = [e.get("source", {}).get("issue", {}) for e in timeline if e.get("event") == "cross-referenced"]
+        if any("pull_request" in r for r in refs + linked):
+            raise Refused("source issue has a referenced PR (open/draft/closed); review competing or completed work")
+    except gh.GhError as exc:
+        raise Refused("source activity unavailable; cannot establish absence of competing work") from exc
+
+
+def _duplicate_gate(it: Item) -> None:
+    if it.submitted.get("pr_url"):
+        return
+    try:
+        ms = dedupe.find_matches(it.repo, it.issue_title, it.issue_body, it.path, [], strict=True)
+        own_url = it.submitted.get("issue_url", "")
+        # Only the exact saved target URL may be excluded when resuming our own issue.
+        ms = [m for m in ms if m.number != it.source_issue and not (
+            own_url == f"https://github.com/{it.repo}/issues/{m.number}" and m.url == own_url and not m.is_pr)]
+        if dedupe.is_duplicate(ms):
+            raise Refused("duplicate found: " + ", ".join(f"#{m.number}({m.state})" for m in ms[:3]))
+        recent = dedupe.recent_commit_hits(it.repo, it.path, sorted(dedupe.tokens(it.issue_title))[:6], strict=True)
+        if recent:
+            raise Refused(f"recent commit already touches this: {recent[0]}")
+    except dedupe.Incomplete as exc:
+        raise Refused(str(exc)) from exc
+
+
 def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict]) -> None:
     try:
         safety.kill_switch(cfg)
@@ -110,12 +161,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     why = safety.repo_allowed(cfg, it.repo, history)
     if why and not it.submitted.get("issue_url"):
         raise Refused(why)
-    if it.source_issue:
-        source = gh.api(f"repos/{it.repo}/issues/{it.source_issue}", fresh=True)
-        if source.get("state") != "open" or "pull_request" in source:
-            raise Refused("source issue is closed or is a pull request; reconsider the candidate")
-        if source.get("html_url") != f"https://github.com/{it.repo}/issues/{it.source_issue}":
-            raise Refused("source issue URL does not match the target")
+    _source_work_gate(it)
     files = _policy_files(it.repo)
     pol = policy.scan_files(files)
     if pol.anti_ai:
@@ -124,14 +170,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     if why:
         raise Refused(why)
     _disclosure(cfg, it.repo)  # surfaces an unclear or conflicting disclosure policy in the dry run
-    if not it.submitted.get("issue_url"):
-        ms = dedupe.find_matches(it.repo, it.issue_title, it.issue_body, it.path, [])
-        ms = [m for m in ms if m.number != it.source_issue]
-        if dedupe.is_duplicate(ms):
-            raise Refused("duplicate found: " + ", ".join(f"#{m.number}({m.state})" for m in ms[:3]))
-        recent = dedupe.recent_commit_hits(it.repo, it.path, sorted(dedupe.tokens(it.issue_title))[:6])
-        if recent:
-            raise Refused(f"recent commit already touches this: {recent[0]}")
+    _duplicate_gate(it)
     cwd = str(Path(it.clone))
     base = _base(cwd)
     _identity_gate(cfg, cwd, base, it.repo, fork=False)
@@ -215,6 +254,8 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
     _identity_gate(cfg, cwd, _base(cwd), it.repo, fork=False)  # re-check at the write boundary
     _evidence_gate(it)  # exact tested content again immediately before the first external write
     _admission_gate(it, cfg)  # current upstream consent, never cached
+    _source_work_gate(it)
+    _duplicate_gate(it)
     me = gh.api("user", fresh=True)["login"]
 
     def progress(**kw) -> None:
@@ -253,6 +294,8 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
     if not prog.get("pr_url"):
         if limiter.remaining() <= 0:
             raise Refused("daily PR cap reached; existing issue/fork progress retained for a later day")
+        _source_work_gate(it)
+        _duplicate_gate(it)
         body = f"{it.pr_body}\n\nCloses #{num}{note}"
         _admission_gate(it, cfg)
         draft = ["--draft"] if cfg.maintainer_admission else []

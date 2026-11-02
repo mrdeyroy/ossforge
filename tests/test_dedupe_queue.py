@@ -86,3 +86,33 @@ def test_snippet_marks_the_finding_line(tmp_path):
     out = hunt.snippet(tmp_path, "m.py", 10, radius=2)
     assert out.splitlines()[2].startswith("   10>") and "line8" in out and "line12" in out and "line13" not in out
     assert hunt.snippet(tmp_path, "missing.py", 3) == ""
+
+
+def test_publication_duplicate_search_cannot_treat_unavailable_as_empty(monkeypatch):
+    from ossforge import gh
+    monkeypatch.setattr(gh, 'search_issues', lambda *a, **k: (_ for _ in ()).throw(gh.GhError('unavailable')))
+    with pytest.raises(dedupe.Incomplete):
+        dedupe.find_matches('o/r', 'parser regression', 'reproduction', 'x.py', [], strict=True)
+
+
+def test_publication_commits_cannot_treat_unavailable_as_empty(monkeypatch):
+    from ossforge import gh
+    monkeypatch.setattr(gh, 'api', lambda *a, **k: (_ for _ in ()).throw(gh.GhError('unavailable')))
+    with pytest.raises(dedupe.Incomplete):
+        dedupe.recent_commit_hits('o/r', 'x.py', ['parser'], strict=True)
+
+
+def test_strict_search_requires_fresh_complete_results(monkeypatch):
+    from ossforge import gh
+    calls = []
+    monkeypatch.setattr(gh, 'api', lambda *a, **k: (calls.append(k) or {'items': [], 'total_count': 1, 'incomplete_results': False}))
+    with pytest.raises(dedupe.Incomplete):
+        dedupe.find_matches('o/r', 'parser crash', '', 'x.py', [], strict=True)
+    assert calls and calls[0]['fresh'] is True
+
+
+def test_strict_search_rejects_incomplete_even_when_empty(monkeypatch):
+    from ossforge import gh
+    monkeypatch.setattr(gh, 'api', lambda *a, **k: {'items': [], 'total_count': 0, 'incomplete_results': True})
+    with pytest.raises(dedupe.Incomplete):
+        dedupe.find_matches('o/r', 'parser crash', '', 'x.py', [], strict=True)
