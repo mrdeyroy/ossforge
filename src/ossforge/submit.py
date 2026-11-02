@@ -159,8 +159,9 @@ def _duplicate_gate(it: Item, cfg: Config | None = None) -> None:
         if not paths or len(paths) > 10:
             raise Refused("duplicate check needs 1..10 verified changed source paths; review larger changes separately")
         matches = {}
+        query_results = {}  # fresh for this gate, never reused at another write boundary
         for path in paths:
-            for match in dedupe.find_matches(it.repo, it.issue_title, it.issue_body, path, [], strict=True):
+            for match in dedupe.find_matches(it.repo, it.issue_title, it.issue_body, path, [], strict=True, query_results=query_results):
                 matches[match.number] = match
         ms = list(matches.values())
         own_url = it.submitted.get("issue_url", "")

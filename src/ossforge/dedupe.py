@@ -40,7 +40,7 @@ class Match:
     reason: str
 
 
-def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str], threshold: float = 0.25, *, strict: bool = False) -> list[Match]:
+def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str], threshold: float = 0.25, *, strict: bool = False, query_results: dict | None = None) -> list[Match]:
     """Searches by file path, symbols, and title keywords; scores each hit locally."""
     queries = [f'repo:{repo} "{path}"']
     queries += [f"repo:{repo} {s}" for s in symbols[:3] if s]
@@ -49,7 +49,14 @@ def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str]
     probe = f"{title}\n{body}"
     for q in queries:
         try:
-            items = gh.search_issues(q, per_page=100 if strict else 20, fresh=strict, require_complete=strict)
+            # Caller-owned, scoped to one gate only; each write boundary gets a new map.
+            key = (repo, q, strict)
+            if query_results is not None and key in query_results:
+                items = query_results[key]
+            else:
+                items = gh.search_issues(q, per_page=100 if strict else 20, fresh=strict, require_complete=strict)
+                if query_results is not None:
+                    query_results[key] = items
             if strict and len(items) >= 100:
                 raise Incomplete("duplicate search reached its result limit; narrow and review before publication")
         except gh.GhError as exc:
