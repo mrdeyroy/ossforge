@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
+from . import agent_next, duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
 from . import admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -86,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("audit", "scan a repo for bug/perf candidates", "repo")
     add("hunt", "scan, rank, de-duplicate and enqueue", "repo")
     add("queue", "list queue items")
+    add("agent-next", "read-only IDE checkpoint: stop, reconcile, verify, work or discover")
     at = add("agent-task", "print a model-neutral local task as JSON")
     at.add_argument("--item", default=None)
     add("agent-verify", "validate external-driver result and rerun tests; never publish", "result_file")
@@ -302,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         emit(result)
         return 0 if result["status"] in ("no_work", "verified_not_submitted", "submitted") else 1
+    elif a.cmd == "agent-next":
+        emit(agent_next.next_step(cfg, q, a.config))
     elif a.cmd == "agent-task":
         try:
             emit(driver.task(q, a.item))

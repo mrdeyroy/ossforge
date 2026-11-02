@@ -402,6 +402,11 @@ directories do not share this lock, and this is not a distributed execution serv
 
 ### External local AI drivers
 
+For an assistant already open in an IDE, start with `agent-next` and
+[one starter prompt](docs/local-ai.md). It reports local STOP/reconciliation/verified/
+candidate/no-work checkpoints without invoking a model or publishing. An IDE can
+drive the CLI directly; it does not need to spawn a second AI process.
+
 `agent-task [--item ID]` emits a versioned model-neutral task for a clean cloned
 candidate. `agent-verify RESULT.json` validates the result contract and reruns
 verification itself; it never trusts model-supplied test evidence or publishes.
