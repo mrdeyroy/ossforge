@@ -39,3 +39,12 @@ def test_result_cannot_mark_verified_or_publish_without_tests(tmp_path, monkeypa
     monkeypatch.setattr(driver.verify, 'verify_fix', lambda *a, **k: pytest.fail('must not run stale task'))
     with pytest.raises(driver.Invalid, match='base changed'):
         driver.complete(q, dict(result(), base='old'))
+
+
+def test_uncloned_lead_does_not_hide_ready_lower_ranked_candidate(tmp_path, monkeypatch):
+    q = Queue(tmp_path / 'q.json')
+    q.add(Item('uncloned', 'owner/one', '', 1, 'feature', 'lead', status='clean', rank=20))
+    q.add(Item('ready', 'owner/two', 'm.py', 1, 'issue', 'lead', status='clean', rank=10, clone=str(tmp_path)))
+    monkeypatch.setattr(driver.submit, '_base', lambda *a: 'base')
+    monkeypatch.setattr(driver.evidence, 'capture', lambda *a: {})
+    assert driver.task(q)['id'] == 'ready'
