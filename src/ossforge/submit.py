@@ -12,7 +12,7 @@ import fcntl
 from collections.abc import Callable
 from pathlib import Path
 
-from . import admission, evidence, contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet
+from . import admission, evidence, contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet, predictor
 from .config import Config
 from .limiter import DailyLimiter
 from .queue import Item
@@ -133,16 +133,25 @@ def _duplicate_gate(it: Item) -> None:
     if it.submitted.get("pr_url"):
         return
     try:
-        ms = dedupe.find_matches(it.repo, it.issue_title, it.issue_body, it.path, [], strict=True)
+        changed = _run(["git", "diff", "--name-only", f"{_base(it.clone)}..HEAD"], it.clone).splitlines()
+        paths = [p for p in changed if not predictor.is_test_path(p)]
+        if not paths or len(paths) > 10:
+            raise Refused("duplicate check needs 1..10 verified changed source paths; review larger changes separately")
+        matches = {}
+        for path in paths:
+            for match in dedupe.find_matches(it.repo, it.issue_title, it.issue_body, path, [], strict=True):
+                matches[match.number] = match
+        ms = list(matches.values())
         own_url = it.submitted.get("issue_url", "")
         # Only the exact saved target URL may be excluded when resuming our own issue.
         ms = [m for m in ms if m.number != it.source_issue and not (
             own_url == f"https://github.com/{it.repo}/issues/{m.number}" and m.url == own_url and not m.is_pr)]
         if dedupe.is_duplicate(ms):
             raise Refused("duplicate found: " + ", ".join(f"#{m.number}({m.state})" for m in ms[:3]))
-        recent = dedupe.recent_commit_hits(it.repo, it.path, sorted(dedupe.tokens(it.issue_title))[:6], strict=True)
-        if recent:
-            raise Refused(f"recent commit already touches this: {recent[0]}")
+        for path in paths:
+            recent = dedupe.recent_commit_hits(it.repo, path, sorted(dedupe.tokens(it.issue_title))[:6], strict=True)
+            if recent:
+                raise Refused(f"recent commit already touches this: {recent[0]}")
     except dedupe.Incomplete as exc:
         raise Refused(str(exc)) from exc
 
