@@ -73,6 +73,7 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
     blocked = {r["repo"] for r in history if r.get("repo") and safety.repo_allowed(cfg, r["repo"], history)}
 
     repos: list[str] = []
+    issues: list[scout.Candidate] = []
     feats: list[scout.Candidate] = []
     day = int(time.time() // 86400)
     for lang in cfg.languages:
@@ -81,8 +82,10 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
         notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
         for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" else
                   discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
-            if c.verdict.decision == "approve" and c.repo not in repos:
-                repos.append(c.repo)
+            if c.verdict.decision == "approve":
+                issues.append(c)
+                if c.repo not in repos:
+                    repos.append(c.repo)
         notes.append("discovery funnel: " + scout.explain_funnel(scout.LAST_FUNNEL))
         if day % 2:
             feats += [c for c in scout.scout_features(cfg, stats, lang, 8, blocked) if c.verdict.decision == "approve"]
@@ -94,6 +97,14 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
         r = hunt.hunt(cfg, repo, q, stats)
         notes.append(f"hunt {repo}: " + (f"skipped (anti-AI in {r['anti_ai']})" if r["anti_ai"]
                                          else f"{r['clean']} clean, {r['duplicate']} duplicate"))
+        if not r["anti_ai"]:
+            clone = hunt.clone(cfg, repo)
+            for c in (item for item in issues if item.repo == repo):
+                # Search/vet approval is only a work lead, not verified correctness.
+                q.add(Item(f"{c.repo}#{c.number}:issue", c.repo, "", c.number, "issue", c.title,
+                           status="clean", clone=str(clone), work="fix", rank=c.score,
+                           notes=[c.url], source_issue=c.number))
+            q.save()
     for c in feats[:3]:
         it = Item(f"{c.repo}#{c.number}:feature", c.repo, "", c.number, "feature", c.title,
                   status="clean", work="feature", notes=[c.url])

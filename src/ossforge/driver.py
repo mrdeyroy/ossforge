@@ -24,7 +24,7 @@ def task(queue: Queue, item_id: str | None = None) -> dict:
     base = submit._base(str(clone))
     return {'schema': 1, 'status': 'ready', 'id': item.id, 'repo': item.repo,
             'clone': str(clone.resolve()), 'base': base, 'candidate': item.detail,
-            'path': item.path, 'line': item.line, 'notes': item.notes,
+            'path': item.path, 'line': item.line, 'notes': item.notes, 'source_issue': item.source_issue,
             'requirements': ['candidate is not proof of a bug', 'read repository contribution policy',
                              'check issues, pull requests and recent commits for duplicates',
                              'commit a regression test and minimal source fix on a new local branch',

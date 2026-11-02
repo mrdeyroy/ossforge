@@ -110,6 +110,12 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     why = safety.repo_allowed(cfg, it.repo, history)
     if why and not it.submitted.get("issue_url"):
         raise Refused(why)
+    if it.source_issue:
+        source = gh.api(f"repos/{it.repo}/issues/{it.source_issue}", fresh=True)
+        if source.get("state") != "open" or "pull_request" in source:
+            raise Refused("source issue is closed or is a pull request; reconsider the candidate")
+        if source.get("html_url") != f"https://github.com/{it.repo}/issues/{it.source_issue}":
+            raise Refused("source issue URL does not match the target")
     files = _policy_files(it.repo)
     pol = policy.scan_files(files)
     if pol.anti_ai:
@@ -120,6 +126,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     _disclosure(cfg, it.repo)  # surfaces an unclear or conflicting disclosure policy in the dry run
     if not it.submitted.get("issue_url"):
         ms = dedupe.find_matches(it.repo, it.issue_title, it.issue_body, it.path, [])
+        ms = [m for m in ms if m.number != it.source_issue]
         if dedupe.is_duplicate(ms):
             raise Refused("duplicate found: " + ", ".join(f"#{m.number}({m.state})" for m in ms[:3]))
         recent = dedupe.recent_commit_hits(it.repo, it.path, sorted(dedupe.tokens(it.issue_title))[:6])
@@ -215,6 +222,14 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
         if save:
             save(dict(prog))
 
+    if not prog.get("issue_url") and it.source_issue:
+        source = gh.api(f"repos/{it.repo}/issues/{it.source_issue}", fresh=True)
+        if source.get("state") != "open" or "pull_request" in source:
+            raise Refused("source issue changed before publication; reconsider it")
+        url = source.get("html_url")
+        if url != f"https://github.com/{it.repo}/issues/{it.source_issue}":
+            raise Refused("source issue URL does not match the target")
+        progress(issue_url=url, existing_issue=True)
     if not prog.get("issue_url"):
         url = _run(["gh", "issue", "create", "-R", it.repo, "-t", it.issue_title, "-b", it.issue_body + note])
         progress(issue_url=url)
