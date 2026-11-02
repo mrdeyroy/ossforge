@@ -12,7 +12,7 @@ import fcntl
 from collections.abc import Callable
 from pathlib import Path
 
-from . import admission, evidence, contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet, predictor
+from . import duplicate_reviews, admission, evidence, contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet, predictor
 from .config import Config
 from .limiter import DailyLimiter
 from .queue import Item
@@ -150,7 +150,7 @@ def _source_work_gate(it: Item) -> None:
         raise Refused("source activity unavailable; cannot establish absence of competing work") from exc
 
 
-def _duplicate_gate(it: Item) -> None:
+def _duplicate_gate(it: Item, cfg: Config | None = None) -> None:
     if it.submitted.get("pr_url"):
         return
     try:
@@ -167,13 +167,15 @@ def _duplicate_gate(it: Item) -> None:
         # Only the exact saved target URL may be excluded when resuming our own issue.
         ms = [m for m in ms if m.number != it.source_issue and not (
             own_url == f"https://github.com/{it.repo}/issues/{m.number}" and m.url == own_url and not m.is_pr)]
+        if cfg is not None:
+            ms = [m for m in ms if not duplicate_reviews.unchanged(cfg.path("duplicate_reviews.json"), it, m.number)]
         if dedupe.is_duplicate(ms):
             raise Refused("duplicate found: " + ", ".join(f"#{m.number}({m.state})" for m in ms[:3]))
         for path in paths:
             recent = dedupe.recent_commit_hits(it.repo, path, sorted(dedupe.tokens(it.issue_title))[:6], strict=True)
             if recent:
                 raise Refused(f"recent commit already touches this: {recent[0]}")
-    except dedupe.Incomplete as exc:
+    except (dedupe.Incomplete, gh.GhError, ValueError) as exc:
         raise Refused(str(exc)) from exc
 
 
@@ -201,7 +203,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     if why:
         raise Refused(why)
     _disclosure(cfg, it.repo)  # surfaces an unclear or conflicting disclosure policy in the dry run
-    _duplicate_gate(it)
+    _duplicate_gate(it, cfg)
     cwd = str(Path(it.clone))
     base = _base(cwd)
     _identity_gate(cfg, cwd, base, it.repo, fork=False)
@@ -290,7 +292,7 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
     _admission_gate(it, cfg)  # current upstream consent, never cached
     _upstream_gate(it)
     _source_work_gate(it)
-    _duplicate_gate(it)
+    _duplicate_gate(it, cfg)
     me = gh.api("user", fresh=True)["login"]
 
     def progress(**kw) -> None:
@@ -331,7 +333,7 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
             raise Refused("daily PR cap reached; existing issue/fork progress retained for a later day")
         _upstream_gate(it)
         _source_work_gate(it)
-        _duplicate_gate(it)
+        _duplicate_gate(it, cfg)
         body = f"{it.pr_body}\n\nCloses #{num}{note}"
         _admission_gate(it, cfg)
         draft = ["--draft"] if cfg.maintainer_admission else []
