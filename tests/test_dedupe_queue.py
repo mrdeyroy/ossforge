@@ -116,3 +116,43 @@ def test_strict_search_rejects_incomplete_even_when_empty(monkeypatch):
     monkeypatch.setattr(gh, 'api', lambda *a, **k: {'items': [], 'total_count': 0, 'incomplete_results': True})
     with pytest.raises(dedupe.Incomplete):
         dedupe.find_matches('o/r', 'parser crash', '', 'x.py', [], strict=True)
+
+
+@pytest.mark.parametrize('text', ['[{"id":"prior-publication",', '{}', '[{}]', '[null]'])
+def test_corrupt_existing_queue_refuses_without_overwriting(tmp_path, text):
+    p = tmp_path / 'queue.json'
+    p.write_text(text)
+    with pytest.raises(queue.InvalidState):
+        queue.Queue(p)
+    assert p.read_text() == text
+
+
+def test_failed_queue_save_preserves_previous_bytes(tmp_path, monkeypatch):
+    from pathlib import Path
+    p = tmp_path / 'queue.json'
+    q = queue.Queue(p)
+    q.add(queue.Item('first', 'o/r', 'm.py', 1, 'controlled', 'local'))
+    q.save()
+    original = p.read_bytes()
+    q.add(queue.Item('second', 'o/r', 'n.py', 1, 'controlled', 'local'))
+    replace = Path.replace
+    def fail(source, target):
+        if target == p:
+            raise OSError('controlled replace failure')
+        return replace(source, target)
+    monkeypatch.setattr(Path, 'replace', fail)
+    with pytest.raises(OSError):
+        q.save()
+    assert p.read_bytes() == original
+
+
+def test_duplicate_queue_ids_refuse_instead_of_losing_first_progress(tmp_path):
+    import json
+    from dataclasses import asdict
+    p = tmp_path / 'queue.json'
+    first = asdict(queue.Item('same', 'o/r', 'm.py', 1, 'controlled', 'first', submitted={'issue_url': 'retained'}))
+    second = {**first, 'submitted': {}}
+    p.write_text(json.dumps([first, second]))
+    with pytest.raises(queue.InvalidState):
+        queue.Queue(p)
+    assert 'retained' in p.read_text()
