@@ -375,3 +375,27 @@ def test_second_stale_invocation_recovers_completed_urls_without_duplicates(worl
     assert sum(c[:2] == ['issue', 'create'] for c in calls) == 1
     assert sum(c[:2] == ['pr', 'create'] for c in calls) == 1
     assert world['lim'].remaining() == 1
+
+
+def test_existing_source_issue_is_reused_not_created(world):
+    original = gh.api
+    def api(path, /, **kwargs):
+        if path == 'repos/acme/lib/issues/42':
+            return {'state': 'open', 'html_url': 'https://github.com/acme/lib/issues/42'}
+        return original(path, **kwargs)
+    world['mp'].setattr(gh, 'api', api)
+    world['it'].source_issue = 42
+    result = run(world, execute=True)
+    assert result['issue'].endswith('/42')
+    calls = writes(world['log'])
+    assert not any(c[:2] == ['issue', 'create'] for c in calls)
+    assert any('Closes #42' in arg for c in calls for arg in c)
+
+
+def test_closed_source_issue_stops_before_writes(world):
+    original = gh.api
+    world['it'].source_issue = 42
+    world['mp'].setattr(gh, 'api', lambda path, **kw: {'state': 'closed'} if path.endswith('/issues/42') else original(path, **kw))
+    with pytest.raises(submit.Refused, match='source issue is closed'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
