@@ -54,6 +54,9 @@ def _run(cfg, command, timeout, attempts, execute, discover, journal):
     job = driver.task(q) if not pending else {'status': 'resume_verified', 'id': pending[0].id}
     if job['status'] == 'no_work':
         journal.note(job['reason'])
+        if journal.data.get('outcome') in ('discovery_budget_exhausted', 'rate_limited', 'halted'):
+            return {'schema': 1, 'status': 'discovery_incomplete',
+                    'reason': journal.data['outcome'], 'candidate_status': 'no_work'}
         return job
     item_id = job['id']
     if job['status'] != 'resume_verified':

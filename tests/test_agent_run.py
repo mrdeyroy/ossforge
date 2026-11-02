@@ -83,3 +83,14 @@ def test_invalid_limits_do_not_start_work(tmp_path):
     for args in [dict(timeout=0), dict(timeout=float('nan')), dict(attempts=0), dict(attempts=True)]:
         with pytest.raises(driver.Invalid):
             agent_run.run(cfg, ['driver'], **args)
+
+
+def test_partial_discovery_without_candidate_is_incomplete_not_no_work(tmp_path, monkeypatch):
+    cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'))
+    def partial(cfg, journal):
+        journal.data['outcome'] = 'discovery_budget_exhausted'
+        return []
+    monkeypatch.setattr(agent_run.loop, '_run_once', partial)
+    out = agent_run.run(cfg, ['must-not-start'])
+    assert out['status'] == 'discovery_incomplete'
+    assert not cfg.path('driver-attempts.json').exists()
