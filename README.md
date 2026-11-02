@@ -466,3 +466,18 @@ conflict and rerun verification; fetching alone does not make old test evidence
 current. A completed saved PR can still be recovered without new writes. This
 conservative rule can require retesting even after an unrelated upstream change;
 it cannot eliminate a change racing immediately after the final read.
+
+### Review a duplicate-search false positive
+
+A monolithic source file can match unrelated issues. Do not lower duplicate thresholds or
+skip the publication guard. After reading the returned issue/PR and its current diff:
+
+```sh
+ossforge review-duplicate ITEM 123 --reason "Different API/cause; describe the distinction after reading it"
+```
+
+This explicit local decision applies only to that verified candidate's exact text and
+verification receipt and the reviewed upstream item revision (PR head/base included).
+Any candidate or upstream change invalidates it. Every publication boundary re-reads
+reviewed matches; unreadable sources refuse publication. New matches and recent-commit
+hits still block. It is not a general approval of a repository or a claim of novelty.

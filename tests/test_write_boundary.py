@@ -440,11 +440,11 @@ def test_source_activity_blocks_competing_work_before_writes(world, activity, ex
 def test_new_competitor_between_preflight_and_write_refuses(world):
     original = submit._duplicate_gate
     count = []
-    def gate(it):
+    def gate(it, cfg=None):
         count.append(True)
         if len(count) == 2:
             raise submit.Refused('new competing PR found')
-        return original(it)
+        return original(it, cfg)
     world['mp'].setattr(submit, '_duplicate_gate', gate)
     with pytest.raises(submit.Refused, match='new competing'):
         run(world, execute=True)
@@ -540,3 +540,82 @@ def test_new_policy_template_not_hidden_by_cached_snapshot_listing(world, monkey
     with pytest.raises(submit.Refused, match='changed since the review'):
         run(world, execute=True)
     assert writes(world['log']) == []
+
+
+@pytest.mark.parametrize('change', ['none', 'candidate', 'text', 'head', 'new-match', 'unavailable', 'commit'])
+def test_reviewed_false_positive_bound_to_candidate_and_live_upstream(world, change):
+    from ossforge import dedupe, duplicate_reviews
+    it, cfg, mp = world['it'], world['cfg'], world['mp']
+    state = {'title': 'different concurrency defect', 'head': 'abc'}
+    original = gh.api
+    def api(endpoint, **kw):
+        if endpoint == 'repos/acme/lib/issues/13':
+            if state.get('unavailable'):
+                raise gh.GhError('unavailable')
+            return dict(number=13, title=state['title'], body='unrelated', state='open', updated_at='t',
+                        html_url='https://github.com/acme/lib/pull/13', pull_request={})
+        if endpoint == 'repos/acme/lib/pulls/13':
+            return dict(head={'sha': state['head']}, base={'sha': 'base'}, state='open', updated_at='t')
+        return original(endpoint, **kw)
+    mp.setattr(gh, 'api', api)
+    matches = [dedupe.Match(13, 'unrelated', 'https://github.com/acme/lib/pull/13', 'open', True, .3, 'same file')]
+    mp.setattr(dedupe, 'find_matches', lambda *a, **k: matches)
+    with pytest.raises(submit.Refused, match='duplicate found'):
+        run(world)
+    duplicate_reviews.record(cfg.path('duplicate_reviews.json'), it, 13, 'Different cause and API; reviewed diff')
+    if change == 'candidate':
+        it.issue_body += ' changed'
+    elif change == 'text':
+        state['title'] += ' new'
+    elif change == 'head':
+        state['head'] = 'def'
+    elif change == 'new-match':
+        matches.append(dedupe.Match(14, 'actual duplicate', 'https://github.com/acme/lib/pull/14', 'open', True, 1, 'same'))
+    elif change == 'unavailable':
+        state['unavailable'] = True
+    elif change == 'commit':
+        mp.setattr(dedupe, 'recent_commit_hits', lambda *a, **k: ['https://github.com/acme/lib/commit/existing'])
+    if change == 'none':
+        run(world)
+    else:
+        with pytest.raises(submit.Refused):
+            run(world, execute=True)
+        assert writes(world['log']) == []
+
+
+def test_duplicate_review_requires_verified_candidate_and_reason(world):
+    from ossforge import duplicate_reviews
+    it, path = world['it'], world['cfg'].path('duplicate_reviews.json')
+    with pytest.raises(ValueError):
+        duplicate_reviews.record(path, it, 13, '')
+    it.status = 'clean'
+    with pytest.raises(ValueError):
+        duplicate_reviews.record(path, it, 13, 'unrelated')
+    assert not path.exists()
+
+
+def test_false_positive_review_rechecked_before_first_write(world):
+    from ossforge import dedupe, duplicate_reviews
+    it, cfg, mp = world['it'], world['cfg'], world['mp']
+    rev = ['old']
+    original = gh.api
+    def api(endpoint, **kw):
+        if endpoint == 'repos/acme/lib/issues/13':
+            return dict(number=13, title='different cause', body=rev[0], state='open', updated_at=rev[0],
+                        html_url='https://github.com/acme/lib/issues/13')
+        return original(endpoint, **kw)
+    mp.setattr(gh, 'api', api)
+    mp.setattr(dedupe, 'find_matches', lambda *a, **k: [
+        dedupe.Match(13, 'unrelated', 'https://github.com/acme/lib/issues/13', 'open', False, .3, 'same file')])
+    duplicate_reviews.record(cfg.path('duplicate_reviews.json'), it, 13, 'Different API and cause')
+    real = submit._duplicate_gate
+    seen = []
+    def gate(item, conf=None):
+        seen.append(1)
+        if len(seen) == 2:
+            rev[0] = 'new work'
+        return real(item, conf)
+    mp.setattr(submit, '_duplicate_gate', gate)
+    with pytest.raises(submit.Refused, match='duplicate found'):
+        run(world, execute=True)
+    assert len(seen) == 2 and writes(world['log']) == []

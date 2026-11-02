@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
+from . import duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
 from . import admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     prv.add_argument("--accept", action="store_true", help="record that you read the docs and the repo's own pages")
     prv.add_argument("--prohibited", action="store_true", help="record that the repo's rules forbid this contribution")
     prv.add_argument("--note", default="", help="restrictions that apply, in your words")
+    dr = add("review-duplicate", "record one reviewed false positive for this exact verified candidate", "id")
+    dr.add_argument("number", type=int)
+    dr.add_argument("--reason", required=True)
     add("prepare", "set this work tree's own git author/committer to the configured identity (local config only)", "id")
     cm = add("commit", "identity-checked git commit in an item's clone", "id")
     cm.add_argument("-m", "--message", required=True)
@@ -187,6 +190,13 @@ def main(argv: list[str] | None = None) -> int:
             for d in snap["docs"]:
                 print(f"\n== {d['path']}  {d['url']}  blob {d['sha'][:10]}\n{d['text'][:1500]}")
             print("\nThe scan reads fixed locations only. Also read the project's contribution/AI pages yourself.")
+    elif a.cmd == "review-duplicate":
+        try:
+            duplicate_reviews.record(cfg.path("duplicate_reviews.json"), q.items[a.id], a.number, a.reason)
+        except (ValueError, gh.GhError) as exc:
+            print("REFUSED:", exc)
+            return 1
+        print("reviewed only this candidate/item revision; all other duplicate and commit gates remain active")
     elif a.cmd == "prepare":
         bad = identity.apply_local(cfg, q.items[a.id].clone)
         print("READY: this clone commits as the configured identity" if not bad else "NOT READY: " + "; ".join(bad))
