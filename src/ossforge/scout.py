@@ -11,7 +11,11 @@ from .config import Config
 from .outcomes import Stats
 
 FEATURE_LABELS = ["enhancement", "feature request", "feature"]
-_MONEY = re.compile(r"(\$\s?\d|\b\d[\d,]*\s?(eth|usdt|usdc|rtc|btc|sol)\b)", re.I)
+_MONEY = re.compile(
+    r"(?<![\w\\/])\$\s?(?:[1-9]\d{1,}(?:,\d{3})*(?:\.\d{2})?k?\b|\d+(?:\.\d+)?\s?(?:usd|eur|gbp|dollars?)\b)"
+    r"|\b\d+(?:\.\d+)?[\d,]*\s?(?:eth|usdt|usdc|btc|sol|rtc)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -29,9 +33,22 @@ class Candidate:
     updated_at: str = ""
 
 
+def _matches_keyword(hay: str, kw: str) -> bool:
+    kw = kw.strip().lower()
+    if not kw:
+        return False
+    if kw == "token":
+        return bool(re.search(r"\b(?:crypto|airdrop|claim|free|reward|pool|presale)\s+tokens?\b|\btokens?\s+(?:airdrop|claim|presale|giveaway)\b", hay))
+    if kw == "rtc":
+        return bool(re.search(r"\b\d+\s*rtc\b|\brtc\s*(?:token|coin|airdrop|reward)\b", hay))
+    pattern = r"(?<!\w)" + re.escape(kw) + r"(?!\w)"
+    return bool(re.search(pattern, hay))
+
+
 def is_spam(title: str, body: str, keywords: list[str]) -> bool:
-    hay = f"{title}\n{(body or '')[:600]}".lower()
-    return bool(_MONEY.search(hay)) or any(k in hay for k in keywords)
+    b = (body or "")[:600]
+    hay = f"{title}\n{b}".lower()
+    return bool(_MONEY.search(hay)) or any(_matches_keyword(hay, k) for k in keywords)
 
 
 def score_issue(it: dict, repo_score: int, now: datetime | None = None) -> tuple[float, list[str]]:

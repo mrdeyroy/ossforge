@@ -22,6 +22,24 @@ def test_no_matches_is_distinct_from_filtered(monkeypatch, tmp_path):
     assert msg.startswith("ALL FILTERED") and "'spam': 1" in msg
 
 
+def test_is_spam_precision():
+    from ossforge.config import Config
+    kw = Config().spam_keywords
+    # Code terms and shell variables should not be marked as spam
+    assert not scout.is_spam("Fix crash in tokenize", "When input contains quote, tokenize() fails with $0 or $1", kw)
+    assert not scout.is_spam("Support WebRTC streaming", "We need to handle WebRTC audio streams in client", kw)
+    assert not scout.is_spam("Script error in setup.sh", "Line 4: [ $1 = test ] gives unbound variable", kw)
+    assert not scout.is_spam("KaTeX math formula", "Formula $1$ and $2$ fail to render in markdown", kw)
+    assert not scout.is_spam("Auth Bearer token", "KeyError when reading csrf_token from request headers", kw)
+    # Monetary and crypto bounties should be marked as spam
+    assert scout.is_spam("[BOUNTY] fix thing (Pool: 500 RTC)", "", kw)
+    assert scout.is_spam("Fix parser", "pays $200 on merge", kw)
+    assert scout.is_spam("Bounty $50 for fix", "", kw)
+    assert scout.is_spam("Claim free token airdrop", "join our telegram", kw)
+    assert scout.is_spam("Bug bounty program", "Reward 100 USDT for bug", kw)
+    assert scout.is_spam("Crypto reward", "Offering 0.5 ETH for quick PR", kw)
+
+
 def test_rate_limit_reports_partial_not_silence(monkeypatch, tmp_path):
     monkeypatch.setattr(gh, "api", lambda *a, **k: {"stargazers_count": 500})
     monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [_issue(1), _issue(2)])
