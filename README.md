@@ -254,3 +254,44 @@ maintainers. Decisions live in the configured `state_dir/issue_reviews.json`:
 configs sharing that directory share decisions; separate state directories do not.
 The `reviewed_unchanged` funnel count distinguishes these skips from no matches.
 The existing `reject ID` command still applies to queued static findings only.
+
+### Bounded discovery and skill hints
+
+`ossforge discover --language python --label bug --strategy rotate --limit 20`
+keeps the same star, health, claim, policy and acceptance checks as `scout`, but
+rotates one bounded search source per successful pass:
+
+- `broad`: normal ecosystem label/language search.
+- `preferred`: repositories in `preferred_repos` (up to five per turn).
+- `history`: repositories with observed merged PRs in local `bootstrap`/outcome history (up to five per turn).
+
+Empty sources are omitted from automatic rotation. An explicitly selected empty
+source returns no matches, not an unexpected broad search. Repository windows
+rotate so a long preference/history list is not permanently truncated. A rate-limit
+stop retains the turn and does not hide partial results from the retry. JSON
+includes the selected source, exact query and repository window. One pass performs
+one search query, with the usual per-issue vetting calls; it does not silently fall
+through every source trying to fill a quota.
+
+`discover` temporarily hides previously surfaced **approved** issues while their
+upstream `updated_at` is unchanged (`recent_issue_days: 7`). Changed or missing
+timestamps return for review. `--include-recent` bypasses this rotation; setting
+`recent_issue_days: 0` disables it. This is not a rejection or permanent validity
+judgment. State is local to `state_dir` in `discovery.json`; `review-issue` remains
+the separate explicit reasoned decision. Legacy `scout` and `features` do not hide
+recent results. For the continuous loop, opt in with `discovery_strategy: rotate`;
+the default `broad` keeps the original loop behavior.
+
+Optional configuration:
+
+```yaml
+preferred_repos: [pallets/click, python/cpython]
+skills: [python, asyncio]
+recent_issue_days: 7
+discovery_strategy: rotate
+```
+
+Skill terms add a small, bounded ranking bonus for word-boundary matches in the
+issue title/body and show the matched terms. They never waive a gate and are not
+proof of difficulty, implementation fit or maintainer acceptance. No model or API
+key is required. Affinity means where to look, never permission to publish.
