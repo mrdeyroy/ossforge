@@ -189,3 +189,15 @@ def test_default_python_verification_does_not_lint_deleted_source(tmp_path, monk
     sh(r, 'git', 'commit', '-qm', 'remove source')
     result = verify.verify_fix(r, base, Path(sys.executable), ['test_absence.py'])
     assert result.ok, result.log
+
+
+def test_timed_out_verification_kills_descendant_processes(tmp_path):
+    import sys
+    import time
+    marker = tmp_path / 'late-write'
+    child = f"import time;from pathlib import Path;time.sleep(1.5);Path({str(marker)!r}).write_text('late')"
+    parent = 'import subprocess,sys,time;subprocess.Popen([sys.executable,"-c",sys.argv[1]],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);time.sleep(30)'
+    rc, _ = verify._run([sys.executable, '-c', parent, child], tmp_path, timeout=0.2)
+    assert rc == 124
+    time.sleep(1.7)
+    assert not marker.exists(), 'timed-out test left a descendant running after baseline restoration'

@@ -8,6 +8,7 @@ isolation up separately for untrusted repos.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -26,13 +27,23 @@ def scrubbed_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 def _run(cmd: list[str], cwd: Path, timeout: int = 600, env: dict | None = None) -> tuple[int, str]:
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout, env=env or scrubbed_env())
+        with subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, encoding="utf-8", errors="replace",
+                              env=env or scrubbed_env(), start_new_session=True) as proc:
+            try:
+                out, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # A test runner can spawn workers. Kill the entire timed-out group
+                # before restoring source files or running the patched test.
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.communicate()
+                return 124, f"timeout after {timeout}s; test process group terminated"
+            return proc.returncode, (out + err)[-4000:]
     except OSError as e:
         return 127, str(e)
-    except subprocess.TimeoutExpired:
-        return 124, f"timeout after {timeout}s"
-    return p.returncode, (p.stdout + p.stderr)[-4000:]
 
 
 def venv_python(work: Path, repo: str) -> Path:
