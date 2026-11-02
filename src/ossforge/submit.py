@@ -97,17 +97,27 @@ def cla_status(repo: str, pr: int) -> str:
 
 
 def _source_work_gate(it: Item) -> None:
-    if not it.source_issue or it.submitted.get("pr_url"):
+    if it.submitted.get("pr_url"):
+        return
+    number = it.source_issue
+    saved = it.submitted.get("issue_url", "")
+    if not number and saved:
+        prefix = f"https://github.com/{it.repo}/issues/"
+        suffix = saved.removeprefix(prefix)
+        if not saved.startswith(prefix) or not suffix.isdigit():
+            raise Refused("saved issue URL is not an exact issue in the target repository")
+        number = int(suffix)
+    if not number:
         return
     try:
-        source = gh.api(f"repos/{it.repo}/issues/{it.source_issue}", fresh=True)
+        source = gh.api(f"repos/{it.repo}/issues/{number}", fresh=True)
         if source.get("state") != "open" or "pull_request" in source:
             raise Refused("source issue is closed or is a pull request; reconsider the candidate")
-        if source.get("html_url") != f"https://github.com/{it.repo}/issues/{it.source_issue}":
+        if source.get("html_url") != f"https://github.com/{it.repo}/issues/{number}":
             raise Refused("source issue URL does not match the target")
-        comments = gh.api(f"repos/{it.repo}/issues/{it.source_issue}/comments", per_page=100, fresh=True) or []
-        timeline = gh.api(f"repos/{it.repo}/issues/{it.source_issue}/timeline", per_page=100, fresh=True) or []
-        refs = gh.search_issues(f"repo:{it.repo} is:pr #{it.source_issue} in:body,title", per_page=100, fresh=True, require_complete=True)
+        comments = gh.api(f"repos/{it.repo}/issues/{number}/comments", per_page=100, fresh=True) or []
+        timeline = gh.api(f"repos/{it.repo}/issues/{number}/timeline", per_page=100, fresh=True) or []
+        refs = gh.search_issues(f"repo:{it.repo} is:pr #{number} in:body,title", per_page=100, fresh=True, require_complete=True)
         if any(len(rows) >= 100 for rows in (comments, timeline, refs)):
             raise Refused("source activity sample saturated; review complete activity before publication")
         if source.get("assignees") or any(vet.comment_claims_issue(c.get("body", "")) for c in comments):

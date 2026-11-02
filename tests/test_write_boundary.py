@@ -27,6 +27,10 @@ GH_SHIM = textwrap.dedent('''\
             reply(200, {"login": os.environ["FAKE_GH_LOGIN"]})
         if path == "search/issues":
             reply(200, {"total_count": 0, "items": []})
+        if path == "repos/acme/lib/issues/11":
+            reply(200, {"state": "open", "html_url": "https://github.com/acme/lib/issues/11"})
+        if path in ("repos/acme/lib/issues/11/comments", "repos/acme/lib/issues/11/timeline"):
+            reply(200, [])
         if path.endswith("/commits"):
             reply(200, [])
         reply(404, {"message": "Not Found"})
