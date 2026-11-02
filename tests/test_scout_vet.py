@@ -97,3 +97,121 @@ def test_repository_pr_access_compatibility_and_unknowns(monkeypatch):
                            ({'pull_request_creation_policy': 'collaborators_only', 'permissions': []}, True)]:
         monkeypatch.setattr(gh, 'api', lambda *a, info=info, **k: info)
         assert bool(repo_access.pr_restriction('owner/repo')) is blocked
+
+
+def test_is_issue_claimed_time_decay():
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    # Empty comments
+    assert not vet.is_issue_claimed([], now=now)
+
+    # Comments without any claim
+    assert not vet.is_issue_claimed([{"body": "Can you provide a repro?", "created_at": "2026-11-01T10:00:00Z"}], now=now)
+
+    # Stale claim (>14 days) with no follow-up comments
+    stale_claim = [
+        {
+            "user": {"login": "user1"},
+            "body": "I'll take this issue!",
+            "created_at": "2026-10-01T00:00:00Z",
+            "updated_at": "2026-10-01T00:00:00Z",
+        }
+    ]
+    assert not vet.is_issue_claimed(stale_claim, now=now)
+
+    # Stale claim (>14 days), but claimant posted a follow-up comment recently (<14 days)
+    active_with_followup = [
+        {
+            "user": {"login": "user1"},
+            "body": "I'll take this issue!",
+            "created_at": "2026-10-01T00:00:00Z",
+        },
+        {
+            "user": {"login": "user1"},
+            "body": "Still working on fixing the regression",
+            "created_at": "2026-10-28T00:00:00Z",
+        },
+    ]
+    assert vet.is_issue_claimed(active_with_followup, now=now)
+
+    # Stale claim (>14 days), but an unrelated user commented recently
+    stale_with_unrelated_comment = [
+        {
+            "user": {"login": "user1"},
+            "body": "I'll take this issue!",
+            "created_at": "2026-10-01T00:00:00Z",
+        },
+        {
+            "user": {"login": "user2"},
+            "body": "Confirmed, I can reproduce this issue on Ubuntu 24.04.",
+            "created_at": "2026-11-01T00:00:00Z",
+        },
+    ]
+    assert not vet.is_issue_claimed(stale_with_unrelated_comment, now=now)
+
+    # Recent claim (<14 days)
+    recent_claim = [
+        {
+            "user": {"login": "user3"},
+            "body": "I am working on this now",
+            "created_at": "2026-10-25T00:00:00Z",
+        }
+    ]
+    assert vet.is_issue_claimed(recent_claim, now=now)
+
+    # Missing timestamp fallback: conservatively treated as active claim
+    fallback_claim = [
+        {
+            "user": {"login": "user4"},
+            "body": "I'm working on this",
+        }
+    ]
+    assert vet.is_issue_claimed(fallback_claim, now=now)
+
+
+def test_vet_issue_claim_decay_integration(monkeypatch):
+    from ossforge import gh, repo_access
+    monkeypatch.setattr(repo_access, "pr_restriction", lambda repo: None)
+    monkeypatch.setattr(vet, "policy_texts", lambda repo: {"CONTRIBUTING.md": "Please test your code."})
+    monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [])
+
+    # Case 1: Issue with a 30-day-old claim comment -> approved (claim expired)
+    def api_stale(path, **kw):
+        if path.endswith("/comments"):
+            return [
+                {
+                    "user": {"login": "ghost_dev"},
+                    "body": "I'll take this",
+                    "created_at": "2020-01-01T00:00:00Z",
+                }
+            ]
+        return {
+            "assignees": [],
+            "body": "Steps to reproduce:\n1. Run the test command.\n2. Observe the expected error traceback.",
+        }
+
+    monkeypatch.setattr(gh, "api", api_stale)
+    v1 = vet.vet_issue("owner/repo", 1)
+    assert v1.decision == "approve"
+    assert "claimed in comments" not in v1.reasons
+
+    # Case 2: Issue with a fresh claim comment (no date -> active fallback) -> skipped
+    def api_fresh(path, **kw):
+        if path.endswith("/comments"):
+            return [
+                {
+                    "user": {"login": "active_dev"},
+                    "body": "I'm working on this now",
+                }
+            ]
+        return {
+            "assignees": [],
+            "body": "Steps to reproduce:\n1. Run the test command.\n2. Observe the expected error traceback.",
+        }
+
+    monkeypatch.setattr(gh, "api", api_fresh)
+    v2 = vet.vet_issue("owner/repo", 2)
+    assert v2.decision == "skip"
+    assert "claimed in comments" in v2.reasons
+

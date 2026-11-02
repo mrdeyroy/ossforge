@@ -7,8 +7,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from . import contributing, gh, policy, repo_access
+
+CLAIM_EXPIRY_DAYS = 14
 
 CLAIM_RE = re.compile(
     r"(i'?m (working|taking)|i'?ll (take|work|do|fix|submit)|working on (this|it)|"
@@ -21,6 +25,68 @@ CLAIM_RE = re.compile(
 
 def comment_claims_issue(body: str) -> bool:
     return bool(CLAIM_RE.search((body or "").replace("’", "'")))
+
+
+def _parse_comment_time(val: Any) -> datetime | None:
+    if not isinstance(val, str) or not val.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def is_issue_claimed(
+    comments: list[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+    max_age_days: int = CLAIM_EXPIRY_DAYS,
+) -> bool:
+    """Check whether any comment makes an active claim on an issue.
+
+    Claims decay and expire after `max_age_days` (default 14 days) of inactivity
+    by the claimant. If the claimant posted subsequent comments within the window,
+    the claim remains active. If timestamps are absent or unparseable, claims are
+    conservatively retained as active.
+    """
+    if not comments:
+        return False
+
+    ref_now = datetime.now(timezone.utc) if now is None else (
+        now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    )
+    max_delta = timedelta(days=max_age_days)
+
+    claim_comments = [c for c in comments if comment_claims_issue(c.get("body", ""))]
+    if not claim_comments:
+        return False
+
+    user_latest_time: dict[str, datetime] = {}
+    for c in comments:
+        user = c.get("user")
+        login = user.get("login") if isinstance(user, dict) else None
+        c_time = _parse_comment_time(c.get("updated_at") or c.get("created_at"))
+        if login and c_time:
+            if login not in user_latest_time or c_time > user_latest_time[login]:
+                user_latest_time[login] = c_time
+
+    for claim in claim_comments:
+        claim_time = _parse_comment_time(claim.get("updated_at") or claim.get("created_at"))
+        if claim_time is None:
+            return True
+
+        user = claim.get("user")
+        login = user.get("login") if isinstance(user, dict) else None
+        last_activity = user_latest_time.get(login, claim_time) if login else claim_time
+
+        age = ref_now - last_activity
+        if age <= max_delta:
+            return True
+
+    return False
 
 
 def clear_requirements(body: str) -> bool:
@@ -94,7 +160,7 @@ def vet_issue(repo: str, number: int, repo_ok: bool = True) -> Verdict:
         return Verdict(f"{repo}#{number}", "skip", [restricted])
     issue = gh.api(f"repos/{repo}/issues/{number}")
     comments = gh.api(f"repos/{repo}/issues/{number}/comments") or []
-    claimed = any(comment_claims_issue(c.get("body", "")) for c in comments)
+    claimed = is_issue_claimed(comments)
     prs = gh.search_issues(f"repo:{repo} is:pr is:open #{number} in:body,title", per_page=10)
     files = policy_texts(repo)
     pol = policy.scan_files(files)
