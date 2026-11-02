@@ -12,7 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import discovery, digest, gh, hunt, patrol, safety, scout, submit
+from . import discovery, digest, gh, hunt, patrol, safety, scout, submit, runs
 from .config import Config
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -21,12 +21,32 @@ from .queue import Item, Queue
 MAX_REPOS_PER_PASS = 4
 
 
-def run_once(cfg: Config) -> list[str]:
-    notes: list[str] = []
+def run_once(cfg: Config, progress=None) -> list[str]:
+    try:
+        with runs.Run(Path(cfg.state_dir), progress) as run:
+            return _run_once(cfg, run)
+    except runs.Busy as exc:
+        return [f"halted: {exc}"]
+
+
+class Notes(list):
+    def __init__(self, run):
+        super().__init__()
+        self.run = run
+
+    def append(self, text):
+        super().append(text)
+        self.run.note(text)
+
+
+def _run_once(cfg: Config, run) -> list[str]:
+    notes = Notes(run)
     try:
         safety.kill_switch(cfg)
     except safety.Blocked as e:
-        return [f"halted: {e}"]
+        run.data["outcome"] = "halted"
+        notes.append(f"halted: {e}")
+        return notes
     gh.configure(cfg.path("cache"), cfg.cache_ttl_seconds)
     q = Queue(cfg.path("queue.json"))
     audit = safety.Audit(cfg.path("audit.jsonl"))
@@ -36,12 +56,14 @@ def run_once(cfg: Config) -> list[str]:
     try:
         _pass(cfg, q, audit, stats, limiter, notes)
     except gh.RateLimited as e:
+        run.data["outcome"] = "rate_limited"
         notes.append(f"stopped early: GitHub rate limit ({str(e)[:80]}). Progress is saved; the next pass continues after the cooldown.")
     digest.write(cfg.path("digest.md"), digest.render(q, audit, [], notes))
     return notes
 
 
 def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: DailyLimiter, notes: list[str]) -> None:
+    notes.append("patrol: checking existing contributions")
     actions = patrol.patrol(audit, stats)
     notes.append(f"patrol: {sum(a.kind not in ('idle',) for a in actions)} open item(s) need attention")
 
@@ -54,15 +76,19 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
     for lang in cfg.languages:
         # one label per pass (rotating) keeps the request burst small; features alternate days
         label = cfg.labels[day % len(cfg.labels)]
+        notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
         for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" else
                   discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
             if c.verdict.decision == "approve" and c.repo not in repos:
                 repos.append(c.repo)
+        notes.append("discovery funnel: " + scout.explain_funnel(scout.LAST_FUNNEL))
         if day % 2:
             feats += [c for c in scout.scout_features(cfg, stats, lang, 8, blocked) if c.verdict.decision == "approve"]
+            notes.append("feature funnel: " + scout.explain_funnel(scout.LAST_FUNNEL))
     notes.append(f"scout: {len(repos)} healthy, open-to-AI repo(s) with approved issues")
 
     for repo in repos[:MAX_REPOS_PER_PASS]:
+        notes.append(f"hunt {repo}: starting")
         r = hunt.hunt(cfg, repo, q, stats)
         notes.append(f"hunt {repo}: " + (f"skipped (anti-AI in {r['anti_ai']})" if r["anti_ai"]
                                          else f"{r['clean']} clean, {r['duplicate']} duplicate"))
@@ -97,8 +123,7 @@ def run_forever(cfg: Config, interval_s: int) -> None:
     if not math.isfinite(interval_s) or interval_s < 1:
         raise ValueError("loop interval must be finite and at least one second")
     while True:
-        for n in run_once(cfg):
-            print(n, flush=True)
+        run_once(cfg, progress=lambda text: print(text, flush=True))
         if Path(cfg.kill_file).exists():
             return
         time.sleep(interval_s)
