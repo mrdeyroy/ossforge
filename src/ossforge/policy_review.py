@@ -19,11 +19,12 @@ from .config import Config
 
 def snapshot(repo: str) -> dict:
     docs = []
-    for p in gh.existing_files(repo, policy.POLICY_FILES):
+    for p in gh.existing_files(repo, policy.POLICY_FILES, fresh=True, strict=True):
         d = gh.api(f"repos/{repo}/contents/{p}", fresh=True)
-        if isinstance(d, dict) and d.get("encoding") == "base64":
-            text = base64.b64decode(d["content"]).decode("utf-8", "replace")
-            docs.append({"path": p, "url": d.get("html_url", ""), "sha": d.get("sha", ""), "text": text})
+        if not isinstance(d, dict) or d.get("encoding") != "base64" or not d.get("sha") or not d.get("html_url"):
+            raise gh.GhError(f"listed policy document could not be read: {p}")
+        text = base64.b64decode(d["content"]).decode("utf-8", "replace")
+        docs.append({"path": p, "url": d["html_url"], "sha": d["sha"], "text": text})
     sc = policy.scan_files({d["path"]: d["text"] for d in docs})
     return {"repo": repo, "docs": docs, "scanned_locations": list(policy.POLICY_FILES), "anti_ai": sc.anti_ai,
             "ai_policy_docs": policy.ai_policy_docs({d["path"]: d["text"] for d in docs})}

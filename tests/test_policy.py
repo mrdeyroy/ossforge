@@ -23,7 +23,7 @@ def test_readme_and_contributing_rst_are_policy_sources(tmp_path):
 
 def test_rst_restrictions_are_in_review_snapshot(monkeypatch):
     from ossforge import policy_review
-    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths: [p for p in paths if p == 'README.rst'])
+    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths, **kw: [p for p in paths if p == 'README.rst'])
     import base64
     text = 'Automated issue reports need production examples, not contrived examples.'
     monkeypatch.setattr(policy_review.gh, 'api', lambda *a, **k: {
@@ -41,7 +41,7 @@ def test_pr_template_and_contrib_guide_are_review_sources(monkeypatch):
         '.github/PULL_REQUEST_TEMPLATE.md': 'AI-assisted changes must include an LLM commit tag and human input.',
         'docs/contrib.rst': 'All tests must pass before merge.',
     }
-    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths: [p for p in paths if p in contents])
+    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths, **kw: [p for p in paths if p in contents])
     monkeypatch.setattr(policy_review.gh, 'api', lambda path, **kw: {
         'encoding': 'base64', 'content': base64.b64encode(contents[path.split('/contents/')[1]].encode()).decode(),
         'html_url': 'https://github.com/local/fixture', 'sha': path,
@@ -57,7 +57,7 @@ def test_pr_template_changes_invalidate_review(tmp_path, monkeypatch):
     path = '.github/PULL_REQUEST_TEMPLATE.md'
     import base64
     sha = ['old']
-    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths: [p for p in paths if p == path])
+    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths, **kw: [p for p in paths if p == path])
     monkeypatch.setattr(policy_review.gh, 'api', lambda *a, **kw: {
         'encoding': 'base64', 'content': base64.b64encode(b'Please read these restrictions.').decode(),
         'html_url': 'https://github.com/local/fixture', 'sha': sha[0],
@@ -66,3 +66,28 @@ def test_pr_template_changes_invalidate_review(tmp_path, monkeypatch):
     assert policy_review.check(cfg, 'local/fixture') == ''
     sha[0] = 'new'
     assert path in policy_review.check(cfg, 'local/fixture')
+
+
+def test_review_check_sees_new_policy_file_despite_cached_listing(tmp_path, monkeypatch):
+    import base64
+    from ossforge import policy_review
+    from ossforge.config import Config
+    cfg = Config(state_dir=str(tmp_path))
+    policy_review.record(cfg, 'local/fixture', {'docs': [], 'scanned_locations': []}, 'Reviewed no files')
+    def listing(repo, paths, *, fresh=False, strict=False):
+        return ['.github/PULL_REQUEST_TEMPLATE.md'] if fresh and strict else []
+    monkeypatch.setattr(policy_review.gh, 'existing_files', listing)
+    monkeypatch.setattr(policy_review.gh, 'api', lambda *a, **kw: {
+        'encoding': 'base64', 'content': base64.b64encode(b'Human review is required.').decode(),
+        'html_url': 'https://github.com/local/fixture', 'sha': 'new-template',
+    })
+    assert '.github/PULL_REQUEST_TEMPLATE.md' in policy_review.check(cfg, 'local/fixture')
+
+
+def test_review_snapshot_refuses_unreadable_listed_document(monkeypatch):
+    import pytest
+    from ossforge import policy_review
+    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda *a, **kw: ['README.md'])
+    monkeypatch.setattr(policy_review.gh, 'api', lambda *a, **kw: {'encoding': 'none'})
+    with pytest.raises(policy_review.gh.GhError, match='could not be read'):
+        policy_review.snapshot('local/fixture')
