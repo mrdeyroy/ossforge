@@ -97,7 +97,7 @@ def _ensure_signoff(cwd: str) -> None:
 def _policy_files(repo: str) -> dict[str, str]:
     """Fail closed: if the repo's policy docs cannot be read, nothing is published."""
     try:
-        return vet.policy_texts(repo)
+        return vet.policy_texts(repo, fresh=True)
     except gh.GhError as e:
         raise Refused(f"could not read {repo} policy docs ({e}); not publishing") from e
 

@@ -309,17 +309,21 @@ def cache_put(key: str, value: Any) -> None:
         cp.write_text(json.dumps(value), encoding="utf-8")
 
 
-def existing_files(repo: str, paths: tuple[str, ...]) -> list[str]:
+def existing_files(repo: str, paths: tuple[str, ...], *, fresh: bool = False, strict: bool = False) -> list[str]:
     """Which of `paths` exist, using one directory listing per parent (3 calls) instead of one probe per path."""
     parents = {p.rsplit("/", 1)[0] if "/" in p else "" for p in paths}
     present: set[str] = set()
     for d in parents:
         try:
-            listing = api(f"repos/{repo}/contents/{d}".rstrip("/")) or []
+            listing = api(f"repos/{repo}/contents/{d}".rstrip("/"), fresh=fresh)
         except RateLimited:
             raise
-        except GhError:
+        except GhError as exc:
+            if strict and (exc.status != 404 or not d):
+                raise
             continue
+        if strict and (not isinstance(listing, list) or len(listing) >= 1000 or any(not isinstance(x, dict) or "path" not in x for x in listing)):
+            raise GhError("policy directory listing unavailable")
         if isinstance(listing, list):
             present.update(x["path"] for x in listing if x.get("type") == "file")
     return [p for p in paths if p in present]
@@ -328,11 +332,11 @@ def existing_files(repo: str, paths: tuple[str, ...]) -> list[str]:
 _MISSING: set[tuple[str, str, str | None]] = set()
 
 
-def file_text(repo: str, path: str, ref: str | None = None) -> str | None:
-    if (repo, path, ref) in _MISSING:
+def file_text(repo: str, path: str, ref: str | None = None, *, fresh: bool = False) -> str | None:
+    if not fresh and (repo, path, ref) in _MISSING:
         return None
     try:
-        d = api(f"repos/{repo}/contents/{path}", **({"ref": ref} if ref else {}))
+        d = api(f"repos/{repo}/contents/{path}", fresh=fresh, **({"ref": ref} if ref else {}))
     except GhError as e:
         if e.status == 404 and not isinstance(e, RateLimited):
             _MISSING.add((repo, path, ref))
