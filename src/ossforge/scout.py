@@ -111,8 +111,8 @@ def scout(
     out: list[Candidate] = []
     try:
         items = gh.search_issues(query or build_query(language, label, cfg.min_stars), per_page=limit)
-    except gh.RateLimited as e:
-        f["stopped"] = f"GitHub rate limit while searching ({e}); nothing was fetched"
+    except (gh.RateLimited, gh.ReadBudgetExceeded) as e:
+        f["stopped"] = f"GitHub read deadline or rate limit while searching ({e}); nothing was fetched"
         return out
     f["fetched"] = len(items)
     for it in items:
@@ -165,8 +165,8 @@ def scout(
                 acc = acceptance.evidence(repo)
                 if acc.status == "none-observed":  # shown, never a filter: the sample is finite and biased
                     v = vet.Verdict(v.issue, v.decision, v.reasons + ["caution: " + acc.reasons[0]])
-        except gh.RateLimited as e:
-            f["stopped"] = f"GitHub rate limit while vetting {repo} ({e}); {len(items) - f['kept']} issues not examined"
+        except (gh.RateLimited, gh.ReadBudgetExceeded) as e:
+            f["stopped"] = f"GitHub read deadline or rate limit while vetting {repo} ({e}); {len(items) - f['kept']} issues not examined"
             break
         sc, why = score_issue(it, rs.score + boost)
         hay = f"{it['title']} {it.get('body') or ''}".lower()

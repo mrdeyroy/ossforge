@@ -220,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd in ("scout", "features", "discover"):
         fn = (lambda: scout.scout(cfg, stats, a.language, a.label, a.limit)) if a.cmd == "scout" else \
              (lambda: scout.scout_features(cfg, stats, a.language, a.limit))
-        res_ = discovery.discover(cfg, stats, a.language, a.label, a.limit, a.strategy, a.include_recent) if a.cmd == "discover" else fn()
+        with gh.read_budget(cfg.discovery_read_budget_seconds):
+            res_ = discovery.discover(cfg, stats, a.language, a.label, a.limit, a.strategy, a.include_recent) if a.cmd == "discover" else fn()
         print("scout:", scout.explain_funnel(scout.LAST_FUNNEL), file=sys.stderr)
         if a.json:
             emit({"funnel": scout.LAST_FUNNEL, "explanation": scout.explain_funnel(scout.LAST_FUNNEL), "candidates": res_})

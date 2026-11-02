@@ -1,7 +1,7 @@
 """Thin GitHub access through the authenticated `gh` CLI (no token handling here).
 
 Adds a disk TTL cache for GETs and a sliding-window budget for the search API
-(30 req/min), the same idea as oss-scout's http-cache and search-budget.
+(9 req/min), the same idea as oss-scout's http-cache and search-budget.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import contextlib
 import fcntl
 import hashlib
 import json
+import math
 import os
 import subprocess
 import time
@@ -19,6 +20,42 @@ from typing import Any
 
 _CACHE_DIR: Path | None = None
 _TTL = 900
+_READ_DEADLINE: float | None = None
+
+
+class ReadBudgetExceeded(RuntimeError):
+    pass
+
+
+def read_remaining() -> float:
+    if _READ_DEADLINE is None:
+        return float("inf")
+    remaining = _READ_DEADLINE - time.monotonic()
+    if remaining <= 0:
+        raise ReadBudgetExceeded("GitHub read budget exhausted; partial results are not a completed search")
+    return remaining
+
+
+@contextlib.contextmanager
+def read_budget(seconds: float):
+    global _READ_DEADLINE
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError("read budget must be finite and positive")
+    previous = _READ_DEADLINE
+    _READ_DEADLINE = min(previous or float("inf"), time.monotonic() + seconds)
+    try:
+        yield
+    finally:
+        _READ_DEADLINE = previous
+
+
+def _sleep(seconds: float):
+    remaining = read_remaining()
+    if seconds >= remaining:
+        raise ReadBudgetExceeded("GitHub read budget cannot cover the required pacing/cooldown wait")
+    time.sleep(seconds)
+
+
 SEARCH_PER_MIN = 9  # well under GitHub's secondary limit; bursts of searches look like scraping
 
 
@@ -158,7 +195,7 @@ def pace_write() -> float:
         g = _load_gates(d)
         gap = WRITE_GAP_S - (time.time() - g.get("last_write", 0.0))
         if gap > 0:
-            time.sleep(gap)
+            _sleep(gap)
         g["last_write"] = reserved = time.time()
         _save_gates(d, g)
     return reserved
@@ -179,7 +216,7 @@ def _budget(path: str) -> None:
         now = time.time()
         times = [t for t in g.get("search", []) if now - t <= 60]
         if len(times) >= SEARCH_PER_MIN:
-            time.sleep(max(0.0, 60 - (now - times[0])) + 0.2)
+            _sleep(max(0.0, 60 - (now - times[0])) + 0.2)
             now = time.time()
             times = [t for t in times if now - t <= 60]
         times.append(time.time())
@@ -195,6 +232,7 @@ def _cache_path(path: str, params: dict) -> Path | None:
 
 
 def api(path: str, /, *, fresh: bool = False, **params: Any) -> Any:
+    read_remaining()
     cp = _cache_path(path, params)
     if cp and not fresh and cp.exists() and time.time() - cp.stat().st_mtime < _TTL:
         try:
@@ -208,10 +246,11 @@ def api(path: str, /, *, fresh: bool = False, **params: Any) -> Any:
     for attempt in range(MAX_RETRIES + 1):
         _budget(path)
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120)
+            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=min(120, read_remaining()))
         except subprocess.TimeoutExpired as exc:
+            read_remaining()
             raise GhError("GitHub API read timed out after 120 seconds; retry later") from exc
-        time.sleep(PACING_S)
+        _sleep(PACING_S)
         headers, body = split_response(p.stdout)
         if p.returncode == 0:
             data = json.loads(body) if body.strip() else None
@@ -221,7 +260,7 @@ def api(path: str, /, *, fresh: bool = False, **params: Any) -> Any:
         if is_rate_limited(status, headers, err):
             wait = retry_wait(headers, attempt)
             if attempt < MAX_RETRIES and wait <= MAX_INLINE_WAIT:
-                time.sleep(wait)  # documented behaviour: honour Retry-After / reset, then try again
+                _sleep(wait)  # documented behaviour: honour Retry-After / reset, then try again
                 continue
             _set_cooldown(wait)
             raise RateLimited(f"{err.splitlines()[0] if err else 'rate limited'} (retry in ~{int(wait)}s)", status, wait)

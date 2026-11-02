@@ -76,20 +76,29 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
     issues: list[scout.Candidate] = []
     feats: list[scout.Candidate] = []
     day = int(time.time() // 86400)
-    for lang in cfg.languages:
-        # one label per pass (rotating) keeps the request burst small; features alternate days
-        label = cfg.labels[day % len(cfg.labels)]
-        notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
-        for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" else
-                  discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
-            if c.verdict.decision == "approve":
-                issues.append(c)
-                if c.repo not in repos:
-                    repos.append(c.repo)
-        notes.append("discovery funnel: " + scout.explain_funnel(scout.LAST_FUNNEL))
-        if day % 2:
-            feats += [c for c in scout.scout_features(cfg, stats, lang, 8, blocked) if c.verdict.decision == "approve"]
-            notes.append("feature funnel: " + scout.explain_funnel(scout.LAST_FUNNEL))
+    try:
+        with gh.read_budget(cfg.discovery_read_budget_seconds):
+            for lang in cfg.languages:
+                # one label per pass (rotating) keeps the request burst small; features alternate days
+                label = cfg.labels[day % len(cfg.labels)]
+                notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
+                for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" else
+                          discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
+                    if c.verdict.decision == "approve":
+                        issues.append(c)
+                        if c.repo not in repos:
+                            repos.append(c.repo)
+                notes.append("discovery funnel: " + scout.explain_funnel(scout.LAST_FUNNEL))
+                if scout.LAST_FUNNEL.get("stopped"):
+                    raise gh.ReadBudgetExceeded(str(scout.LAST_FUNNEL["stopped"]))
+                if day % 2:
+                    feats += [c for c in scout.scout_features(cfg, stats, lang, 8, blocked) if c.verdict.decision == "approve"]
+                    notes.append("feature funnel: " + scout.explain_funnel(scout.LAST_FUNNEL))
+                    if scout.LAST_FUNNEL.get("stopped"):
+                        raise gh.ReadBudgetExceeded(str(scout.LAST_FUNNEL["stopped"]))
+    except gh.ReadBudgetExceeded as exc:
+        notes.run.data["outcome"] = "discovery_budget_exhausted"
+        notes.append(f"discovery stopped: {exc}")
     notes.append(f"scout: {len(repos)} healthy, open-to-AI repo(s) with approved issues")
 
     for repo in repos[:MAX_REPOS_PER_PASS]:
