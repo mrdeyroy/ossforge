@@ -242,3 +242,20 @@ def test_same_parsed_day_never_restores_allowance(tmp_path, style):
     assert limit.remaining() == 0
     limit.record()
     assert json.loads(p.read_text()) == {'day': today.isoformat(), 'count': 3}
+
+
+def test_same_gate_reuses_identical_queries_but_next_gate_is_fresh(monkeypatch):
+    from ossforge import dedupe, gh
+    calls = []
+    def search(q, **kw):
+        calls.append((q, kw))
+        return []
+    monkeypatch.setattr(gh, 'search_issues', search)
+    import inspect
+    for _ in range(2):
+        gate = {}
+        for path in ['rapidjson.cpp', 'docs/rawjson.rst', 'CHANGES.rst']:
+            extra = {'query_results': gate} if 'query_results' in inspect.signature(dedupe.find_matches).parameters else {}
+            dedupe.find_matches('o/r', 'RawJSON Unicode corrupts ASCII', '', path, [], strict=True, **extra)
+    assert len(calls) == 8  # three distinct paths plus one shared title, per fresh gate
+    assert all(kw['fresh'] and kw['require_complete'] for _, kw in calls)
