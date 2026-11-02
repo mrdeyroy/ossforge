@@ -269,7 +269,10 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
 
 def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, execute: bool = False,
             save: Callable[[dict], None] | None = None) -> dict:
-    history = safety.effective_history(audit.read())
+    try:
+        history = safety.effective_history(audit.read())
+    except safety.Blocked as exc:
+        raise Refused(str(exc)) from exc
     preflight(it, limiter, cfg, history)
     plan = {"repo": it.repo, "issue": it.issue_title, "pr": it.pr_title, "branch": it.branch,
             "resume": bool(it.submitted.get("issue_url")),

@@ -197,3 +197,27 @@ def test_daily_ledger_rollover_and_future_date(tmp_path):
     p.write_text(json.dumps({'day': (today + timedelta(days=1)).isoformat(), 'count': 2}))
     with pytest.raises(limiter.InvalidState, match='future'):
         DailyLimiter(p).remaining()
+
+
+def test_valid_audit_lifecycle_and_missing_file(tmp_path):
+    audit = safety.Audit(tmp_path / 'audit.jsonl')
+    assert audit.read() == []
+    audit.log('pr_opened', repo='o/r', pr=1, state='open')
+    audit.update_state('o/r', 1, 'merged')
+    audit.log('issue_opened', repo='o/r', url='local-test')
+    history = safety.effective_history(audit.read())
+    assert len(history) == 3 and history[0]['state'] == 'merged'
+    assert safety.repo_allowed(Config(), 'o/r', history) is None
+
+
+def test_unreadable_audit_is_not_empty_history(tmp_path, monkeypatch):
+    from pathlib import Path
+    audit = safety.Audit(tmp_path / 'audit.jsonl')
+    read = Path.read_text
+    def fail(path, *a, **k):
+        if path == audit.path:
+            raise PermissionError('controlled unreadable file')
+        return read(path, *a, **k)
+    monkeypatch.setattr(Path, 'read_text', fail)
+    with pytest.raises(safety.Blocked, match='audit'):
+        audit.read()
