@@ -104,7 +104,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
         raise Refused(f"status is {it.status!r}, must be 'verified'")
     if not (it.issue_title and it.issue_body and it.pr_title and it.pr_body and it.branch and it.clone):
         raise Refused("missing issue/PR text, branch or clone path")
-    if limiter.remaining() <= 0 and not it.submitted.get("issue_url"):
+    if limiter.remaining() <= 0 and not it.submitted.get("pr_url"):
         raise Refused("daily PR cap reached")
     why = safety.repo_allowed(cfg, it.repo, history)
     if why and not it.submitted.get("issue_url"):
@@ -202,6 +202,8 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
         progress(fork_pushed=True)
 
     if not prog.get("pr_url"):
+        if limiter.remaining() <= 0:
+            raise Refused("daily PR cap reached; existing issue/fork progress retained for a later day")
         body = f"{it.pr_body}\n\nCloses #{num}{note}"
         _admission_gate(it, cfg)
         draft = ["--draft"] if cfg.maintainer_admission else []
