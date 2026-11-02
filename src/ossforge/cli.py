@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import evidence, driver, acceptance, identity, issue_reviews, policy_review
+from . import agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
 from . import admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -84,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     at = add("agent-task", "print a model-neutral local task as JSON")
     at.add_argument("--item", default=None)
     add("agent-verify", "validate external-driver result and rerun tests; never publish", "result_file")
+    add("agent-run", "one bounded local external-driver contribution attempt", command={"required": True},
+             timeout={"type": float, "default": 900}, daily_attempts={"type": int, "default": 2},
+             skip_discovery={"action": "store_true"}, publish={"action": "store_true"})
     vf = add("verify", "run the repo's tests with/without the fix, then mark verified", "id")
     vf.add_argument("--consent-issue", type=int, default=0, help="existing maintainer-approved upstream issue for strict admission")
     vf.add_argument("--branch", required=True)
@@ -266,6 +269,16 @@ def main(argv: list[str] | None = None) -> int:
         r = hunt.hunt(cfg, a.repo, q, stats)
         print(f"SKIP {a.repo}: anti-AI policy in {r['anti_ai']}" if r["anti_ai"]
               else f"{a.repo}: {r['clean']} clean (need verification), {r['duplicate']} duplicate")
+    elif a.cmd == "agent-run":
+        try:
+            result = agent_run.run(cfg, shlex.split(a.command), timeout=a.timeout, attempts=a.daily_attempts,
+                                   execute=a.publish, discover=not a.skip_discovery,
+                                   progress=lambda text: print(text, file=sys.stderr, flush=True))
+        except (driver.Invalid, OSError, evidence.StaleEvidence, safety.Blocked) as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 1
+        emit(result)
+        return 0 if result["status"] in ("no_work", "verified_not_submitted", "submitted") else 1
     elif a.cmd == "agent-task":
         emit(driver.task(q, a.item))
     elif a.cmd == "agent-verify":
