@@ -315,14 +315,14 @@ def existing_files(repo: str, paths: tuple[str, ...], *, fresh: bool = False, st
     present: set[str] = set()
     for d in parents:
         try:
-            listing = api(f"repos/{repo}/contents/{d}".rstrip("/"), fresh=fresh) or []
+            listing = api(f"repos/{repo}/contents/{d}".rstrip("/"), fresh=fresh)
         except RateLimited:
             raise
         except GhError as exc:
             if strict and (exc.status != 404 or not d):
                 raise
             continue
-        if strict and not isinstance(listing, list):
+        if strict and (not isinstance(listing, list) or len(listing) >= 1000 or any(not isinstance(x, dict) or "path" not in x for x in listing)):
             raise GhError("policy directory listing unavailable")
         if isinstance(listing, list):
             present.update(x["path"] for x in listing if x.get("type") == "file")

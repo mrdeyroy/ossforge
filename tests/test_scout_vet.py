@@ -57,3 +57,12 @@ def test_strict_policy_listing_allows_missing_optional_directory_not_missing_roo
     monkeypatch.setattr(gh, 'api', lambda *a, **k: (_ for _ in ()).throw(gh.GhError('not found', 404)))
     with pytest.raises(gh.GhError):
         gh.existing_files('owner/repo', ('README.md',), fresh=True, strict=True)
+
+
+def test_strict_policy_listing_rejects_malformed_or_saturated_result(monkeypatch):
+    import pytest
+    from ossforge import gh
+    for result in ({}, None, [None], [{'path': 'x', 'type': 'file'}] * 1000):
+        monkeypatch.setattr(gh, 'api', lambda *a, result=result, **k: result)
+        with pytest.raises(gh.GhError):
+            gh.existing_files('owner/repo', ('README.md',), fresh=True, strict=True)
