@@ -294,9 +294,12 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
     _identity_gate(cfg, cwd, _base(cwd), it.repo, fork=False)  # re-check at the write boundary
     _evidence_gate(it)  # exact tested content again immediately before the first external write
     _admission_gate(it, cfg)  # current upstream consent, never cached
-    _upstream_gate(it)
-    _source_work_gate(it)
-    _duplicate_gate(it, cfg)
+    # A PR-only resume makes no issue/fork write here. Keep its fresh checks at
+    # the PR write boundary below, instead of repeating a no-effect checkpoint.
+    if not (prog.get("issue_url") and prog.get("fork_pushed")):
+        _upstream_gate(it)
+        _source_work_gate(it)
+        _duplicate_gate(it, cfg)
     me = gh.api("user", fresh=True)["login"]
 
     def progress(**kw) -> None:

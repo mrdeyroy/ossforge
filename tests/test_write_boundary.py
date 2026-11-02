@@ -653,3 +653,27 @@ def test_commit_false_positive_review_is_exact_and_rechecked(world, change):
         with pytest.raises(submit.Refused):
             run(world, execute=True)
         assert writes(world['log']) == []
+
+
+@pytest.mark.parametrize('new_competitor', [False, True])
+def test_pr_only_resume_checks_exactly_at_preflight_and_pr_effect(world, new_competitor):
+    it, mp = world['it'], world['mp']
+    # Local fake gh/bare repos only: prepare persisted issue/fork state without a PR.
+    it.submitted = {'issue_url': 'https://github.com/acme/lib/issues/11', 'fork_pushed': True}
+    real = submit._duplicate_gate
+    seen = []
+    def gate(item, cfg=None):
+        seen.append(1)
+        if new_competitor and len(seen) == 2:
+            raise submit.Refused('competitor at PR boundary')
+        return real(item, cfg)
+    mp.setattr(submit, '_duplicate_gate', gate)
+    if new_competitor:
+        with pytest.raises(submit.Refused, match='competitor'):
+            run(world, execute=True)
+        assert writes(world['log']) == []
+    else:
+        out = run(world, execute=True)
+        assert out['pr'] == 'https://github.com/acme/lib/pull/12'
+        assert [w[:2] for w in writes(world['log'])] == [['pr', 'create']]
+    assert len(seen) == 2
