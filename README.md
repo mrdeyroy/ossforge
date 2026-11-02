@@ -399,3 +399,12 @@ at once. A process that dies leaves a running snapshot; the next pass archives i
 as interrupted before starting a new pass. It does not blindly replay remote writes.
 Existing queue and submission progress still govern later work. Separate state
 directories do not share this lock, and this is not a distributed execution service.
+
+### External local AI drivers
+
+`agent-task [--item ID]` emits a versioned model-neutral task for a clean cloned
+candidate. `agent-verify RESULT.json` validates the result contract and reruns
+verification itself; it never trusts model-supplied test evidence or publishes.
+Use [the local AI workflow](docs/local-ai.md) for a Claude Code or other terminal
+assistant starting prompt and the limits. This is a local driver interface, not a
+claim that an unattended external-model contribution has been validated.

@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import acceptance, identity, issue_reviews, policy_review
+from . import evidence, driver, acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
 from . import admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -81,6 +81,9 @@ def build_parser() -> argparse.ArgumentParser:
     add("audit", "scan a repo for bug/perf candidates", "repo")
     add("hunt", "scan, rank, de-duplicate and enqueue", "repo")
     add("queue", "list queue items")
+    at = add("agent-task", "print a model-neutral local task as JSON")
+    at.add_argument("--item", default=None)
+    add("agent-verify", "validate external-driver result and rerun tests; never publish", "result_file")
     vf = add("verify", "run the repo's tests with/without the fix, then mark verified", "id")
     vf.add_argument("--consent-issue", type=int, default=0, help="existing maintainer-approved upstream issue for strict admission")
     vf.add_argument("--branch", required=True)
@@ -263,6 +266,16 @@ def main(argv: list[str] | None = None) -> int:
         r = hunt.hunt(cfg, a.repo, q, stats)
         print(f"SKIP {a.repo}: anti-AI policy in {r['anti_ai']}" if r["anti_ai"]
               else f"{a.repo}: {r['clean']} clean (need verification), {r['duplicate']} duplicate")
+    elif a.cmd == "agent-task":
+        emit(driver.task(q, a.item))
+    elif a.cmd == "agent-verify":
+        try:
+            result = driver.complete(q, driver.parse(Path(a.result_file)))
+        except (driver.Invalid, OSError, evidence.StaleEvidence) as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 1
+        emit(result)
+        return 0 if result["status"] == "verified" else 1
     elif a.cmd == "queue":
         if a.json:
             emit([dataclasses.asdict(i) for i in sorted(q.items.values(), key=lambda i: -i.rank)])
