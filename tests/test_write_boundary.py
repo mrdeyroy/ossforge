@@ -382,6 +382,8 @@ def test_existing_source_issue_is_reused_not_created(world):
     def api(path, /, **kwargs):
         if path == 'repos/acme/lib/issues/42':
             return {'state': 'open', 'html_url': 'https://github.com/acme/lib/issues/42'}
+        if path in ('repos/acme/lib/issues/42/comments', 'repos/acme/lib/issues/42/timeline'):
+            return []
         return original(path, **kwargs)
     world['mp'].setattr(gh, 'api', api)
     world['it'].source_issue = 42
@@ -397,5 +399,55 @@ def test_closed_source_issue_stops_before_writes(world):
     world['it'].source_issue = 42
     world['mp'].setattr(gh, 'api', lambda path, **kw: {'state': 'closed'} if path.endswith('/issues/42') else original(path, **kw))
     with pytest.raises(submit.Refused, match='source issue is closed'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+
+
+@pytest.mark.parametrize('activity', ['claim', 'draft', 'merged', 'saturated', 'unavailable'])
+def test_source_activity_blocks_competing_work_before_writes(world, activity):
+    original = gh.api
+    world['it'].source_issue = 42
+    def api(path, /, **kw):
+        if path.endswith('/issues/42'):
+            return {'state': 'open', 'html_url': 'https://github.com/acme/lib/issues/42'}
+        if path.endswith('/issues/42/comments'):
+            if activity == 'unavailable':
+                raise gh.GhError('network failed')
+            return [{'body': "I'm working on this"}] if activity == 'claim' else []
+        if path.endswith('/issues/42/timeline'):
+            if activity == 'saturated':
+                return [{}] * 100
+            if activity in ('draft', 'merged'):
+                return [{'event': 'cross-referenced', 'source': {'issue': {'pull_request': {}, 'draft': True, 'state': 'closed' if activity == 'merged' else 'open'}}}]
+            return []
+        return original(path, **kw)
+    world['mp'].setattr(gh, 'api', api)
+    with pytest.raises(submit.Refused):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+
+
+def test_new_competitor_between_preflight_and_write_refuses(world):
+    original = submit._duplicate_gate
+    count = []
+    def gate(it):
+        count.append(True)
+        if len(count) == 2:
+            raise submit.Refused('new competing PR found')
+        return original(it)
+    world['mp'].setattr(submit, '_duplicate_gate', gate)
+    with pytest.raises(submit.Refused, match='new competing'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+
+
+def test_resumed_issue_does_not_bypass_duplicate_checks(world):
+    from ossforge import dedupe
+    world['it'].submitted = {'issue_url': 'https://github.com/acme/lib/issues/11'}
+    world['mp'].setattr(dedupe, 'find_matches', lambda *a, **k: [
+        dedupe.Match(11, 'own', 'https://github.com/acme/lib/issues/11', 'open', False, 1, 'same'),
+        dedupe.Match(13, 'competing', 'https://github.com/acme/lib/pull/13', 'open', True, 1, 'same'),
+    ])
+    with pytest.raises(submit.Refused, match='duplicate found'):
         run(world, execute=True)
     assert writes(world['log']) == []

@@ -430,3 +430,25 @@ and refusing pacing/retry sleeps that cannot fit. An exhausted phase preserves
 partial findings and reports stopped/partial, not a complete no-find result.
 This is not a hard whole-loop deadline: lock contention, filesystem work, patrol,
 clone/hunt, external commands, tests and publication are outside this phase.
+
+### Duplicate and active-work checks at publication
+
+Publication uses uncached path/title/symbol issue and PR searches (all states),
+plus recent commits touching the candidate file (45 days). Failed, incomplete,
+or saturated checks stop publication; they do not mean no duplicate exists.
+An existing saved issue does not bypass these checks on resume. Checks run
+before external writes and again immediately before PR creation.
+
+An approved source issue is reused, never re-created. Its current state,
+assignees, claims in comments, timeline cross-references, and all-state PR
+references are rechecked. A draft/open/closed/merged PR reference requires
+review rather than an automatic competing PR. An old issue with no claim or
+PR is not rejected merely because it is old. Existing claims are conservative
+review stops, not proof somebody is still working on the issue.
+
+These are finite heuristics, not a guarantee: unrelated wording, unlinked work,
+unpushed branches and commits outside the file/time sample can be missed.
+GitHub search can also lag even with cache bypass. Read the actual competing
+change before deciding whether a new PR adds a real correctness or performance
+benefit. That decision is not automated. No remote transaction can eliminate
+the race between a last read and another person's publication.
