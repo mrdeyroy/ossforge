@@ -34,6 +34,9 @@ ANTI_AI_KEYWORDS: tuple[str, ...] = (
 POLICY_FILES: tuple[str, ...] = (
     "CONTRIBUTING.md", ".github/CONTRIBUTING.md", "docs/CONTRIBUTING.md",
     "CONTRIBUTING.rst", ".github/CONTRIBUTING.rst", "docs/CONTRIBUTING.rst",
+    "docs/contrib.rst",
+    "PULL_REQUEST_TEMPLATE.md", ".github/PULL_REQUEST_TEMPLATE.md", "docs/PULL_REQUEST_TEMPLATE.md",
+    "pull_request_template.md", ".github/pull_request_template.md", "docs/pull_request_template.md",
     "CODE_OF_CONDUCT.md", ".github/CODE_OF_CONDUCT.md",
     "AGENTS.md", "AI_POLICY.md", ".github/AI_POLICY.md", "README.md", "README.rst",
 )

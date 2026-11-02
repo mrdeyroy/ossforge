@@ -32,3 +32,37 @@ def test_rst_restrictions_are_in_review_snapshot(monkeypatch):
     })
     snap = policy_review.snapshot('local/fixture')
     assert snap['docs'][0]['text'] == text and snap['docs'][0]['path'] == 'README.rst'
+
+
+def test_pr_template_and_contrib_guide_are_review_sources(monkeypatch):
+    from ossforge import policy_review
+    import base64
+    contents = {
+        '.github/PULL_REQUEST_TEMPLATE.md': 'AI-assisted changes must include an LLM commit tag and human input.',
+        'docs/contrib.rst': 'All tests must pass before merge.',
+    }
+    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths: [p for p in paths if p in contents])
+    monkeypatch.setattr(policy_review.gh, 'api', lambda path, **kw: {
+        'encoding': 'base64', 'content': base64.b64encode(contents[path.split('/contents/')[1]].encode()).decode(),
+        'html_url': 'https://github.com/local/fixture', 'sha': path,
+    })
+    snap = policy_review.snapshot('local/fixture')
+    assert {d['path']: d['text'] for d in snap['docs']} == contents
+
+
+def test_pr_template_changes_invalidate_review(tmp_path, monkeypatch):
+    from ossforge import policy_review
+    from ossforge.config import Config
+    cfg = Config(state_dir=str(tmp_path))
+    path = '.github/PULL_REQUEST_TEMPLATE.md'
+    import base64
+    sha = ['old']
+    monkeypatch.setattr(policy_review.gh, 'existing_files', lambda repo, paths: [p for p in paths if p == path])
+    monkeypatch.setattr(policy_review.gh, 'api', lambda *a, **kw: {
+        'encoding': 'base64', 'content': base64.b64encode(b'Please read these restrictions.').decode(),
+        'html_url': 'https://github.com/local/fixture', 'sha': sha[0],
+    })
+    policy_review.record(cfg, 'local/fixture', policy_review.snapshot('local/fixture'), 'Reviewed template')
+    assert policy_review.check(cfg, 'local/fixture') == ''
+    sha[0] = 'new'
+    assert path in policy_review.check(cfg, 'local/fixture')
