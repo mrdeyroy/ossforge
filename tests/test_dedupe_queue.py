@@ -156,3 +156,31 @@ def test_duplicate_queue_ids_refuse_instead_of_losing_first_progress(tmp_path):
     with pytest.raises(queue.InvalidState):
         queue.Queue(p)
     assert 'retained' in p.read_text()
+
+
+@pytest.mark.parametrize('text', ['{"day":', '{}', '[]', '{"day":"2026-11-02","count":true}', '{"day":"2026-11-02","count":-1}'])
+def test_existing_invalid_daily_ledger_cannot_restore_allowance(tmp_path, text):
+    from ossforge import limiter
+    text = text.replace("2026-11-02", limiter.date.today().isoformat())
+    p = tmp_path / 'daily.json'
+    p.write_text(text)
+    with pytest.raises(limiter.InvalidState):
+        limiter.DailyLimiter(p).remaining()
+    assert p.read_text() == text
+
+
+def test_daily_ledger_failed_replace_preserves_used_allowance(tmp_path, monkeypatch):
+    from pathlib import Path
+    p = tmp_path / 'daily.json'
+    limit = DailyLimiter(p)
+    limit.record()
+    before = p.read_bytes()
+    replace = Path.replace
+    def fail(source, target):
+        if target == p:
+            raise OSError('controlled failed replace')
+        return replace(source, target)
+    monkeypatch.setattr(Path, 'replace', fail)
+    with pytest.raises(OSError):
+        limit.record()
+    assert p.read_bytes() == before and limit.remaining() == 1
