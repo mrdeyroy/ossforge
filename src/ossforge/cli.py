@@ -350,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
         print(digest.render(q, audit, patrol.patrol(audit, stats)))
     elif a.cmd == "loop":
         if a.once:
-            print("\n".join(loop.run_once(cfg)))
+            loop.run_once(cfg, progress=lambda text: print(text, flush=True))
         else:
             loop.run_forever(cfg, int(a.interval_hours * 3600))
     return 0

@@ -387,3 +387,15 @@ GitHub API read subprocesses time out after 120 seconds; a new clone times out a
 operation bounds, not a deadline for an entire discovery pass, verification, external
 patch command or contribution. A pass may perform multiple reads and rate-limit waits.
 CLI results and the local digest are not push notifications, and a loop needs a running host.
+
+### Run progress and recovery records
+
+`loop` and `loop --once` now print stage starts and discovery filter reasons while
+work is in progress. `.state/run.json` is an atomically replaced latest-run record;
+`.state/runs/<id>.json` holds completed/failed/interrupted run summaries. Each record
+contains timestamps and progress, not a proof of contribution correctness.
+A nonblocking state-directory lock prevents two loop passes using the same state
+at once. A process that dies leaves a running snapshot; the next pass archives it
+as interrupted before starting a new pass. It does not blindly replay remote writes.
+Existing queue and submission progress still govern later work. Separate state
+directories do not share this lock, and this is not a distributed execution service.
