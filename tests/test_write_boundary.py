@@ -459,3 +459,26 @@ def test_resumed_issue_does_not_bypass_duplicate_checks(world):
     with pytest.raises(submit.Refused, match='duplicate found'):
         run(world, execute=True)
     assert writes(world['log']) == []
+
+
+def test_issue_lead_uses_verified_changed_source_paths_for_duplicate_check(world):
+    from ossforge import dedupe
+    world['it'].path = ''  # retained issue leads have no static-detector file path
+    seen = []
+    world['mp'].setattr(dedupe, 'find_matches', lambda repo, title, body, path, *a, **k: (seen.append(path) or []))
+    run(world)
+    assert seen and all(p == 'a.py' for p in seen)
+
+
+def test_duplicate_check_covers_each_changed_source_not_just_original_candidate(world):
+    from ossforge import dedupe
+    it = world['it']
+    (world['clone'] / 'other.py').write_text('y = 3\n')
+    sh('git', 'add', 'other.py', cwd=world['clone'])
+    sh('git', 'commit', '-qm', 'additional source', cwd=world['clone'])
+    it.verification = evidence.capture(world['clone'], sh('git', 'merge-base', 'HEAD', 'origin/HEAD', cwd=world['clone']), [['fixture-test']])
+    searches, commits = [], []
+    world['mp'].setattr(dedupe, 'find_matches', lambda repo, title, body, path, *a, **k: (searches.append(path) or []))
+    world['mp'].setattr(dedupe, 'recent_commit_hits', lambda repo, path, *a, **k: (commits.append(path) or []))
+    run(world)
+    assert set(searches) == set(commits) == {'a.py', 'other.py'}

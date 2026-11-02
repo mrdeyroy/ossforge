@@ -452,3 +452,8 @@ GitHub search can also lag even with cache bypass. Read the actual competing
 change before deciding whether a new PR adds a real correctness or performance
 benefit. That decision is not automated. No remote transaction can eliminate
 the race between a last read and another person's publication.
+
+File coverage comes from every non-test path in the actual committed patch, not
+only the detector's original location (issue leads may have no original path).
+Changes over10 source paths stop for separate review rather than silently
+checking only a subset.
