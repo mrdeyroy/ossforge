@@ -10,7 +10,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from . import driver, loop, runs, safety, submit, verify
+from . import driver, loop, runs, safety, submit, verify, evidence
 from .config import Config
 from .limiter import DailyLimiter
 from .queue import Queue
@@ -108,6 +108,8 @@ def _run(cfg, command, timeout, attempts, execute, discover, journal):
             journal.data['outcome'] = checked['status']
             return checked
     item = q.items[item_id]
+    if job['status'] == 'resume_verified':
+        evidence.check(Path(item.clone), submit._base(item.clone), item.branch, item.verification)
     if not execute:
         journal.note('verified patch retained; publication not enabled')
         return {'status': 'verified_not_submitted', 'id': item_id}
