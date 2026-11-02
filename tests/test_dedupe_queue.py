@@ -221,3 +221,24 @@ def test_unreadable_audit_is_not_empty_history(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, 'read_text', fail)
     with pytest.raises(safety.Blocked, match='audit'):
         audit.read()
+
+
+@pytest.mark.parametrize('style', ['compact', 'week'])
+def test_same_parsed_day_never_restores_allowance(tmp_path, style):
+    import json
+    from ossforge import limiter
+    today = limiter.date.today()
+    iso = today.isocalendar()
+    day = today.strftime('%Y%m%d') if style == 'compact' else f'{iso.year}-W{iso.week:02d}-{iso.weekday}'
+    p = tmp_path / 'daily.json'
+    p.write_text(json.dumps({'day': day, 'count': 2}))
+    limit = DailyLimiter(p)
+    try:
+        limiter.date.fromisoformat(day)
+    except ValueError:  # Python 3.10 accepts only canonical dates.
+        with pytest.raises(limiter.InvalidState):
+            limit.remaining()
+        return
+    assert limit.remaining() == 0
+    limit.record()
+    assert json.loads(p.read_text()) == {'day': today.isoformat(), 'count': 3}
