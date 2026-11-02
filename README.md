@@ -311,3 +311,27 @@ Existing queue items that only have `status: verified` but no receipt must be
 verified again. The receipt prevents stale test evidence being reused for a
 changed patch. It is local state, not a signature, remote attestation, protection
 against local-state tampering, or a guarantee that the test proves the right bug.
+
+### Native test commands (non-Python projects)
+
+For a prepared repository, `verify` accepts explicit argv commands instead of
+forcing pip/pytest. For example, replace `--tests ...` in the normal verify command
+with `--test-command 'node --test tests/regression.test.js'` and optionally
+`--check-command 'npm run lint'`. For a Rust project's selected regression test,
+use `--test-command 'cargo test regression_name' --failure-code 101`.
+
+Commands are split into argv with `shlex`, never run through a shell. There is no
+automatic dependency install in this mode: prepare the project's own locked
+requirements first. The same test argv runs without and with the source fix; the
+baseline must exit with the expected assertion-failure code (1, or explicitly101
+for Cargo), and the fixed version must exit0. Missing commands/timeouts do not
+count. Pytest now requires exit1; collection/configuration errors no longer count
+as a reproduced failing test. Additional check commands must also pass and are
+included in the tested-content receipt. Python's existing `--tests` path retains
+its venv/install/ruff behavior.
+
+This is runner support, not automatic language setup or a universal failure
+classifier. Cargo101, for example, can also mean a build failure; read the stored
+logs and prove the intended assertion failed. Commands run with a scrubbed
+environment but are **not sandboxed**. Review repository scripts first; use
+separate isolation for untrusted code. No built-in paid model calls are added.

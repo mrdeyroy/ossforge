@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import dataclasses
 import json
 import sys
@@ -70,7 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
     add("queue", "list queue items")
     vf = add("verify", "run the repo's tests with/without the fix, then mark verified", "id")
     vf.add_argument("--branch", required=True)
-    vf.add_argument("--tests", nargs="+", required=True, help="pytest args selecting the new test")
+    vf.add_argument("--tests", nargs="+", default=[], help="pytest args selecting the new test")
+    vf.add_argument("--test-command", help="explicit test argv parsed with shlex, never a shell; no auto install")
+    vf.add_argument("--check-command", action="append", default=[], help="additional argv check; repeat for lint/type checks")
+    vf.add_argument("--failure-code", type=int, choices=[1, 101], default=1, help="expected baseline assertion failure (cargo test uses 101)")
     vf.add_argument("--issue-title", required=True)
     vf.add_argument("--issue-body-file", required=True)
     vf.add_argument("--pr-title", required=True)
@@ -251,13 +255,28 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "verify":
         it = q.items[a.id]
         clone = Path(it.clone)
-        py = verify.venv_python(Path(cfg.work_dir), it.repo)
-        rc, out = verify.install_project(py, clone, a.install)
-        if rc:
-            print("install failed:\n", out)
-            return 1
+        if not a.tests and not a.test_command:
+            print("verify requires --tests or --test-command", file=sys.stderr)
+            return 2
+        try:
+            test_command = shlex.split(a.test_command) if a.test_command is not None else None
+            checks = [shlex.split(c) for c in a.check_command]
+        except ValueError as e:
+            print(f"invalid command argv: {e}", file=sys.stderr)
+            return 2
+        if test_command == [] or any(not c for c in checks):
+            print("commands must not be empty", file=sys.stderr)
+            return 2
+        py = Path(sys.executable)
+        if test_command is None:
+            py = verify.venv_python(Path(cfg.work_dir), it.repo)
+            rc, out = verify.install_project(py, clone, a.install)
+            if rc:
+                print("install failed:\n", out)
+                return 1
         base = submit._run(["git", "merge-base", "HEAD", "origin/HEAD"], str(clone))
-        r = verify.verify_fix(clone, base, py, a.tests)
+        r = verify.verify_fix(clone, base, py, a.tests, test_command=test_command,
+                              check_commands=checks, failure_code=a.failure_code)
         print("failed without fix:", r.failed_without_fix, "| passed with fix:", r.passed_with_fix, "| lint ok:", r.lint_ok)
         stats.record_kind(it.kind, r.ok)
         stats.save()

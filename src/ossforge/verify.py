@@ -8,7 +8,6 @@ isolation up separately for untrusted repos.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -29,6 +28,8 @@ def _run(cmd: list[str], cwd: Path, timeout: int = 600, env: dict | None = None)
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=timeout, env=env or scrubbed_env())
+    except OSError as e:
+        return 127, str(e)
     except subprocess.TimeoutExpired:
         return 124, f"timeout after {timeout}s"
     return p.returncode, (p.stdout + p.stderr)[-4000:]
@@ -71,10 +72,15 @@ class VerifyResult:
         return self.failed_without_fix and self.passed_with_fix and self.lint_ok and bool(self.fix_files) and bool(self.test_files)
 
 
-def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: int = 600) -> VerifyResult:
+def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: int = 600,
+               *, test_command: list[str] | None = None, check_commands: list[list[str]] | None = None,
+               failure_code: int = 1) -> VerifyResult:
     """The branch at HEAD holds fix + test. Revert only the non-test files to base, expect failure,
     restore, expect success, then lint the touched files."""
     r = VerifyResult()
+    if failure_code not in (1, 101) or test_command == [] or any(not c for c in check_commands or []):
+        r.log.append("test command must be nonempty and failure_code must be 1 or 101")
+        return r
     try:
         initial = evidence.capture(clone, base, [])
     except evidence.StaleEvidence as e:
@@ -86,7 +92,7 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
     if not r.fix_files or not r.test_files:
         r.log.append("branch must change both a source file and a test file")
         return r
-    pytest = [str(py), "-m", "pytest", "-q", "-x", *test_args]
+    pytest = test_command if test_command is not None else [str(py), "-m", "pytest", "-q", "-x", *test_args]
 
     # Files the fix added do not exist at base: `git checkout base -- <them>` would fail for the whole batch and
     # silently leave the fix in place. Revert existing files from base; move new files aside and put them back.
@@ -94,6 +100,9 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
     added = [f for f in r.fix_files if f not in in_base]
     saved = {f: (clone / f).read_bytes() for f in added if (clone / f).is_file()}
     reverted = True
+    if test_command is None and failure_code != 1:
+        r.log.append("pytest baseline must fail with exit 1, not a collection/tool error")
+        return r
     try:
         if in_base:
             rc0, out0 = _run(["git", "checkout", base, "--", *in_base], clone)
@@ -104,7 +113,7 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
             (clone / f).unlink()
         if reverted:
             rc, out = _run(pytest, clone, timeout)
-            r.failed_without_fix = rc not in (0, 124)
+            r.failed_without_fix = rc == failure_code
             r.log.append(f"without fix rc={rc}: {out[-300:]}")
     finally:
         if in_base:
@@ -117,14 +126,18 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
     r.passed_with_fix = rc == 0
     r.log.append(f"with fix rc={rc}: {out[-300:]}")
 
+    checks = list(check_commands or [])
     pyfiles = [f for f in files if f.endswith(".py")]
-    if pyfiles and shutil.which(str(py)) is not None or py.exists():
-        rc, out = _run([str(py), "-m", "ruff", "check", *pyfiles], clone, 120)
-        r.lint_ok = rc == 0
-        r.log.append(f"ruff rc={rc}: {out[-200:]}")
+    if test_command is None and pyfiles:
+        checks.append([str(py), "-m", "ruff", "check", *pyfiles])
+    for command in checks:
+        rc, out = _run(command, clone, 120)
+        r.lint_ok = r.lint_ok and rc == 0
+        r.log.append(f"check {command[0]} rc={rc}: {out[-200:]}")
+
     if r.ok:
         try:
-            r.evidence = evidence.capture(clone, base, [pytest])
+            r.evidence = evidence.capture(clone, base, [pytest, *checks])
             if any(initial[k] != r.evidence[k] for k in ("base", "tree", "branch")):
                 raise evidence.StaleEvidence("verification evidence: git state changed during tests; re-run verify")
         except evidence.StaleEvidence as e:
