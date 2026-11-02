@@ -115,8 +115,13 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
                            notes=[c.url], source_issue=c.number))
             q.save()
     for c in feats[:3]:
+        clone = hunt.clone(cfg, c.repo)
+        pol = hunt.policy_of(clone)
+        if pol.anti_ai:
+            notes.append(f"feature {c.repo}#{c.number}: skipped (anti-AI in {pol.source})")
+            continue
         it = Item(f"{c.repo}#{c.number}:feature", c.repo, "", c.number, "feature", c.title,
-                  status="clean", work="feature", notes=[c.url])
+                  status="clean", work="feature", clone=str(clone), source_issue=c.number, rank=c.score, notes=[c.url])
         q.add(it)
     q.save()
 

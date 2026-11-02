@@ -33,3 +33,34 @@ def test_local_policy_denial_does_not_enqueue_search_issue(tmp_path, monkeypatch
     monkeypatch.setattr(loop.hunt, 'clone', lambda *a: (_ for _ in ()).throw(AssertionError('must not enqueue')))
     loop.run_once(cfg)
     assert Queue(cfg.path('queue.json')).by_status('clean') == []
+
+
+def test_approved_feature_is_cloned_and_reuses_existing_issue(tmp_path, monkeypatch):
+    cfg = Config(state_dir=str(tmp_path/'state'), work_dir=str(tmp_path/'work'), kill_file=str(tmp_path/'STOP'))
+    candidate = scout.Candidate('owner/repo', 84, 'Useful feature', 'https://github.com/owner/repo/issues/84',
+                                80, vet.Verdict(84, 'approve', []), kind='feature')
+    monkeypatch.setattr(loop.patrol, 'patrol', lambda *a: [])
+    monkeypatch.setattr(loop.scout, 'scout', lambda *a, **k: [])
+    monkeypatch.setattr(loop.scout, 'scout_features', lambda *a, **k: [candidate])
+    monkeypatch.setattr(loop.time, 'time', lambda: 86400)
+    clone = tmp_path/'work'/'owner__repo'
+    clone.mkdir(parents=True)
+    monkeypatch.setattr(loop.hunt, 'clone', lambda *a: clone)
+    monkeypatch.setattr(loop.hunt, 'policy_of', lambda *a: loop.hunt.policy.PolicyResult(False, '', []))
+    loop.run_once(cfg)
+    item = Queue(cfg.path('queue.json')).items['owner/repo#84:feature']
+    assert item.clone == str(clone) and item.source_issue == 84
+
+
+def test_feature_local_policy_denial_keeps_it_out_of_driver_queue(tmp_path, monkeypatch):
+    cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'))
+    candidate = scout.Candidate('owner/repo', 84, 'Feature', 'https://github.com/owner/repo/issues/84',
+                                80, vet.Verdict(84, 'approve', []), kind='feature')
+    monkeypatch.setattr(loop.patrol, 'patrol', lambda *a: [])
+    monkeypatch.setattr(loop.scout, 'scout', lambda *a, **k: [])
+    monkeypatch.setattr(loop.scout, 'scout_features', lambda *a, **k: [candidate])
+    monkeypatch.setattr(loop.time, 'time', lambda: 86400)
+    monkeypatch.setattr(loop.hunt, 'clone', lambda *a: tmp_path)
+    monkeypatch.setattr(loop.hunt, 'policy_of', lambda *a: loop.hunt.policy.PolicyResult(True, 'CONTRIBUTING.md', []))
+    loop.run_once(cfg)
+    assert Queue(cfg.path('queue.json')).by_status('clean') == []

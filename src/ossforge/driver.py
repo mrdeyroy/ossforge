@@ -16,7 +16,7 @@ class Invalid(ValueError):
 
 
 def task(queue: Queue, item_id: str | None = None) -> dict:
-    candidates = sorted(queue.by_status('clean'), key=lambda i: -i.rank)
+    candidates = sorted((i for i in queue.by_status('clean') if i.clone), key=lambda i: -i.rank)
     item = queue.items.get(item_id) if item_id else (candidates[0] if candidates else None)
     if not item or item.status != 'clean' or not item.clone:
         return {'schema': 1, 'status': 'no_work', 'reason': 'no clean cloned candidate; run discovery/hunt or review the queue'}
