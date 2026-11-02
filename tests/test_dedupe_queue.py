@@ -144,3 +144,15 @@ def test_failed_queue_save_preserves_previous_bytes(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         q.save()
     assert p.read_bytes() == original
+
+
+def test_duplicate_queue_ids_refuse_instead_of_losing_first_progress(tmp_path):
+    import json
+    from dataclasses import asdict
+    p = tmp_path / 'queue.json'
+    first = asdict(queue.Item('same', 'o/r', 'm.py', 1, 'controlled', 'first', submitted={'issue_url': 'retained'}))
+    second = {**first, 'submitted': {}}
+    p.write_text(json.dumps([first, second]))
+    with pytest.raises(queue.InvalidState):
+        queue.Queue(p)
+    assert 'retained' in p.read_text()
