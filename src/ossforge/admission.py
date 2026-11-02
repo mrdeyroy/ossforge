@@ -30,6 +30,7 @@ _UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _m
 
 
 PATH = ".github/ossforge.yml"
+PATHS = (".github/ossforge.yml", ".github/ossforge.yaml")
 LABEL = "ossforge-approved"
 
 
@@ -38,23 +39,30 @@ class Denied(ValueError):
 
 
 def _read(repo: str) -> dict | None:
-    try:
-        data = gh.api(f"repos/{repo}/contents/{PATH}", fresh=True)
-    except gh.GhError as e:
-        if e.status == 404:
-            return None
-        raise Denied(f"cannot verify maintainer manifest: {e}") from e
+    data = None
+    source_path = PATH
+    for path in PATHS:
+        try:
+            data = gh.api(f"repos/{repo}/contents/{path}", fresh=True)
+            source_path = path
+            break
+        except gh.GhError as e:
+            if e.status == 404:
+                continue
+            raise Denied(f"cannot verify maintainer manifest: {e}") from e
+    if data is None:
+        return None
     try:
         if data.get("encoding") != "base64":
             raise ValueError("unsupported content encoding")
         text = base64.b64decode(data["content"], validate=False).decode("utf-8")
         value = yaml.load(text, Loader=_UniqueLoader)
-        return parse(value)
+        return parse(value, source=source_path)
     except (ValueError, KeyError, AttributeError, UnicodeError, yaml.YAMLError) as e:
         raise Denied(f"invalid maintainer manifest: {e}") from e
 
 
-def parse(value: object) -> dict:
+def parse(value: object, source: str = PATH) -> dict:
     if not isinstance(value, dict) or set(value) - {"version", "enabled", "max_files", "max_lines", "allowed_dirs"}:
         raise Denied("manifest must be a mapping with recognized fields only")
     if type(value.get("version")) is not int or value["version"] != 1 or value.get("enabled") is not True:
@@ -69,7 +77,7 @@ def parse(value: object) -> dict:
     for d in dirs:
         if not isinstance(d, str) or not canonical(d.rstrip('/')) or any(c in d for c in '*?[]'):
             raise Denied("allowed_dirs must contain literal canonical relative directories")
-    return {"source": PATH, "max_files": value.get("max_files", 5), "max_lines": value.get("max_lines", 250),
+    return {"source": source, "max_files": value.get("max_files", 5), "max_lines": value.get("max_lines", 250),
             "allowed_dirs": [d.rstrip('/') for d in dirs]}
 
 
@@ -100,7 +108,7 @@ def check(repo: str, issue: int, paths: list[str], numstat: str) -> dict:
     if not paths or len(paths) > permit['max_files']:
         raise Denied("change exceeds maintainer file budget or is empty")
     for path in paths:
-        if not canonical(path) or (PurePosixPath(path).name == 'ossforge.yml' and path.startswith('.github/')):
+        if not canonical(path) or (PurePosixPath(path).name in ('ossforge.yml', 'ossforge.yaml') and path.startswith('.github/')):
             raise Denied("noncanonical or protected admission path")
         if permit['allowed_dirs'] and not any(path.startswith(d + '/') for d in permit['allowed_dirs']):
             raise Denied(f"path outside maintainer scope: {path}")

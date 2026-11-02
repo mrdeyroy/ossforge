@@ -73,3 +73,24 @@ def test_cli_read_only_denial(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(admission, 'inspect', lambda *a: (_ for _ in ()).throw(admission.Denied('missing consent')))
     assert cli.main(['--config', str(cfg), '--json', 'consent-check', 'o/r']) == 1
     assert 'missing consent' in capsys.readouterr().out
+
+
+def test_manifest_yaml_extension_fallback(monkeypatch):
+    raw = 'version: 1\nenabled: true\nallowed_dirs: [src]\n'
+    def api(path, **kw):
+        if path.endswith('.yml'):
+            raise gh.GhError('not found', 404)
+        if path.endswith('.yaml'):
+            return dict(encoding='base64', content=base64.b64encode(raw.encode()).decode())
+        raise gh.GhError('bad path', 400)
+    monkeypatch.setattr(gh, 'api', api)
+    res = admission.inspect('o/r')
+    assert res['source'] == '.github/ossforge.yaml'
+    assert res['allowed_dirs'] == ['src']
+
+
+def test_protected_yaml_extension_denied(monkeypatch):
+    monkeypatch.setattr(admission, 'inspect', lambda *a: dict(max_files=5, max_lines=50, allowed_dirs=['src']))
+    for protected in ('.github/ossforge.yml', '.github/ossforge.yaml'):
+        with pytest.raises(admission.Denied, match='protected admission path'):
+            admission.check('o/r', 0, [protected], f'1\t1\t{protected}')
