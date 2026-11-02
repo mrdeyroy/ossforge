@@ -8,6 +8,7 @@ step so a failure (e.g. issue created, PR failed) resumes instead of duplicating
 from __future__ import annotations
 
 import subprocess
+import fcntl
 from collections.abc import Callable
 from pathlib import Path
 
@@ -158,6 +159,39 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
 
 def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, execute: bool = False,
            save: Callable[[dict], None] | None = None) -> dict:
+    """Serialize same-state writes and recover progress before checking or writing."""
+    if not execute:
+        return _submit(it, limiter, cfg, audit, execute, save)
+    from .queue import Queue
+    cfg.path("publication.lock").parent.mkdir(parents=True, exist_ok=True)
+    with cfg.path("publication.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise Refused("another publication holds this state directory; retry after it finishes") from exc
+        try:
+            q = Queue(cfg.path("queue.json"))
+            stored = q.items.get(it.id)
+            if stored:
+                it.submitted = dict(stored.submitted)
+                if stored.status == "submitted":
+                    it.status = "verified"  # recheck gates, then return saved URLs without new writes
+            def persist(progress):
+                it.submitted = dict(progress)
+                # Reload to preserve unrelated queue updates; the publication lock owns this item's writes.
+                current = Queue(cfg.path("queue.json"))
+                if it.id in current.items:
+                    current.set(it.id, submitted=dict(progress))
+                    current.save()
+                if save:
+                    save(progress)
+            return _submit(it, limiter, cfg, audit, execute, persist)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, execute: bool = False,
+            save: Callable[[dict], None] | None = None) -> dict:
     history = safety.effective_history(audit.read())
     preflight(it, limiter, cfg, history)
     plan = {"repo": it.repo, "issue": it.issue_title, "pr": it.pr_title, "branch": it.branch,
