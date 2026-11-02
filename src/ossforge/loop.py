@@ -53,18 +53,20 @@ def _run_once(cfg: Config, run) -> list[str]:
     stats = Stats(cfg.path("stats.json"))
     limiter = DailyLimiter(cfg.path("daily.json"), cfg.cap)
 
+    actions: list[patrol.Action] = []
     try:
-        _pass(cfg, q, audit, stats, limiter, notes)
+        _pass(cfg, q, audit, stats, limiter, notes, actions)
     except gh.RateLimited as e:
         run.data["outcome"] = "rate_limited"
         notes.append(f"stopped early: GitHub rate limit ({str(e)[:80]}). Progress is saved; the next pass continues after the cooldown.")
-    digest.write(cfg.path("digest.md"), digest.render(q, audit, [], notes))
+    digest.write(cfg.path("digest.md"), digest.render(q, audit, actions, notes))
     return notes
 
 
-def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: DailyLimiter, notes: list[str]) -> None:
+def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: DailyLimiter, notes: list[str],
+          actions: list[patrol.Action]) -> None:
     notes.append("patrol: checking existing contributions")
-    actions = patrol.patrol(audit, stats)
+    actions.extend(patrol.patrol(audit, stats))
     notes.append(f"patrol: {sum(a.kind not in ('idle',) for a in actions)} open item(s) need attention")
 
     history = safety.effective_history(audit.read())
@@ -116,7 +118,6 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
                 notes.append(f"refused {it.id}: {e}")
         q.save()
 
-    digest.write(cfg.path("digest.md"), digest.render(q, audit, actions, notes))
 
 
 def run_forever(cfg: Config, interval_s: int) -> None:
