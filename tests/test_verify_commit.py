@@ -177,3 +177,15 @@ def test_native_verifier_restores_renamed_source(tmp_path, monkeypatch):
     assert result.ok, result.log
     assert not (r / 'm.py').exists() and (r / 'renamed.py').exists()
     assert not sh(r, 'git', 'status', '--porcelain')
+
+
+def test_default_python_verification_does_not_lint_deleted_source(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'm.py').unlink()
+    (r / 'test_absence.py').write_text("from pathlib import Path\n\n\ndef test_removed():\n    assert not Path('m.py').exists()\n")
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'remove source')
+    result = verify.verify_fix(r, base, Path(sys.executable), ['test_absence.py'])
+    assert result.ok, result.log

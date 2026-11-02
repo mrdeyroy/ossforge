@@ -132,7 +132,7 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
     r.log.append(f"with fix rc={rc}: {out[-300:]}")
 
     checks = list(check_commands or [])
-    pyfiles = [f for f in files if f.endswith(".py")]
+    pyfiles = [f for f in files if f.endswith(".py") and (clone / f).is_file()]
     if test_command is None and pyfiles:
         checks.append([str(py), "-m", "ruff", "check", *pyfiles])
     for command in checks:
