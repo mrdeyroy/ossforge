@@ -131,3 +131,31 @@ def test_verified_resume_rejects_committed_tree_change(tmp_path):
         subprocess.run(cmd, cwd=clone, check=True, capture_output=True)
     with pytest.raises(evidence.StaleEvidence, match='no longer matches'):
         agent_run.run(cfg, ['must-not-start'], discover=False)
+
+
+@pytest.mark.parametrize('ledger', [
+    {'day': '2099-01-01', 'count': 20}, {'count': 20}, {'day': 'typo', 'count': 20},
+    {'day': 'today', 'count': -1}, {'day': 'today', 'count': True},
+    {'day': 'today', 'count': '1'}, [], None,
+])
+def test_invalid_attempt_ledger_preserved_before_any_driver_launch(tmp_path, monkeypatch, ledger):
+    from datetime import date
+    cfg, command = fixture(tmp_path)
+    if isinstance(ledger, dict) and ledger.get('day') == 'today':
+        ledger['day'] = date.today().isoformat()
+    path = cfg.path('driver-attempts.json')
+    path.write_text(json.dumps(ledger))
+    before = path.read_bytes()
+    monkeypatch.setattr(agent_run, 'invoke', lambda *a: pytest.fail('invalid ledger must not launch driver'))
+    with pytest.raises(driver.Invalid, match='ledger|count|date'):
+        agent_run.run(cfg, command, discover=False, attempts=1)
+    assert path.read_bytes() == before
+
+
+def test_prior_day_attempt_count_rolls_over(tmp_path):
+    from datetime import date, timedelta
+    cfg, _ = fixture(tmp_path)
+    path = cfg.path('driver-attempts.json')
+    path.write_text(json.dumps({'day': (date.today() - timedelta(days=1)).isoformat(), 'count': 20}))
+    assert agent_run.run(cfg, ['missing-driver'], discover=False, attempts=1)['status'] == 'driver_error'
+    assert json.loads(path.read_text()) == {'day': date.today().isoformat(), 'count': 1}

@@ -64,15 +64,21 @@ def _run(cfg, command, timeout, attempts, execute, discover, journal):
         try:
             ledger = json.loads(ledger_path.read_text())
         except FileNotFoundError:
-            ledger = {}
-        except ValueError as exc:
+            ledger = {'day': date.today().isoformat(), 'count': 0}
+        except (OSError, ValueError) as exc:
             raise driver.Invalid('invalid attempt ledger; inspect it before continuing') from exc
         today = date.today().isoformat()
-        if not isinstance(ledger, dict):
-            raise driver.Invalid('invalid attempt ledger')
-        count = ledger.get('count', 0) if ledger.get('day') == today else 0
-        if type(count) is not int or count < 0:
+        if not isinstance(ledger, dict) or not isinstance(ledger.get('day'), str):
+            raise driver.Invalid('invalid attempt ledger; inspect it before continuing')
+        try:
+            stored = date.fromisoformat(ledger['day'])
+        except ValueError as exc:
+            raise driver.Invalid('invalid attempt ledger date') from exc
+        if stored > date.today():
+            raise driver.Invalid('attempt ledger is from a future date; inspect host clock/state')
+        if type(ledger.get('count')) is not int or ledger['count'] < 0:
             raise driver.Invalid('invalid attempt count')
+        count = ledger['count'] if stored == date.today() else 0
         if count >= attempts:
             journal.note('daily driver attempt limit reached; candidate stays queued')
             journal.data['outcome'] = 'attempt_limit'
