@@ -259,3 +259,23 @@ def test_same_gate_reuses_identical_queries_but_next_gate_is_fresh(monkeypatch):
             dedupe.find_matches('o/r', 'RawJSON Unicode corrupts ASCII', '', path, [], strict=True, **extra)
     assert len(calls) == 8  # three distinct paths plus one shared title, per fresh gate
     assert all(kw['fresh'] and kw['require_complete'] for _, kw in calls)
+
+
+def test_find_matches_skips_unconstrained_stopword_query(monkeypatch):
+    from ossforge import dedupe, gh
+    calls = []
+    monkeypatch.setattr(gh, 'search_issues', lambda q, **kw: calls.append(q) or [])
+    # Title consists entirely of stop words
+    dedupe.find_matches('o/r', 'Fix bug in py', 'body description', 'src/lib.py', [])
+    assert len(calls) == 1
+    assert calls[0] == 'repo:o/r "src/lib.py"'
+    assert 'repo:o/r ' not in calls
+
+
+def test_recent_commit_hits_avoids_api_on_empty_keywords(monkeypatch):
+    from ossforge import dedupe, gh
+    calls = []
+    monkeypatch.setattr(gh, 'api', lambda *a, **k: calls.append(a))
+    assert dedupe.recent_commit_hits('o/r', 'src/lib.py', []) == []
+    assert calls == []
+

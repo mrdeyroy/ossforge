@@ -42,9 +42,13 @@ class Match:
 
 def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str], threshold: float = 0.25, *, strict: bool = False, query_results: dict | None = None) -> list[Match]:
     """Searches by file path, symbols, and title keywords; scores each hit locally."""
-    queries = [f'repo:{repo} "{path}"']
+    queries = []
+    if path:
+        queries.append(f'repo:{repo} "{path}"')
     queries += [f"repo:{repo} {s}" for s in symbols[:3] if s]
-    queries.append(f"repo:{repo} " + " ".join(sorted(tokens(title))[:6]))
+    title_terms = sorted(tokens(title))[:6]
+    if title_terms:
+        queries.append(f"repo:{repo} " + " ".join(title_terms))
     seen: dict[int, Match] = {}
     probe = f"{title}\n{body}"
     for q in queries:
@@ -85,6 +89,8 @@ def find_matches(repo: str, title: str, body: str, path: str, symbols: list[str]
 def recent_commit_hits(repo: str, path: str, keywords: list[str], days: int = 45, *, strict: bool = False) -> list[str]:
     """Commits touching `path` recently whose message shares keywords with the finding:
     someone may already have fixed it on main."""
+    if not keywords:
+        return []
     from datetime import datetime, timedelta, timezone
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -97,7 +103,12 @@ def recent_commit_hits(repo: str, path: str, keywords: list[str], days: int = 45
     if strict and len(commits) >= 100:
         raise Incomplete("recent commit sample saturated; review a narrower change history")
     kw = {k.lower() for k in keywords}
-    return [c["html_url"] for c in commits if kw & tokens(c["commit"]["message"])]
+    return [
+        c["html_url"]
+        for c in commits
+        if isinstance(c, dict)
+        and kw & tokens((c.get("commit") or {}).get("message") or "")
+    ]
 
 
 def is_duplicate(matches: list[Match], hard: float = 0.45) -> bool:
