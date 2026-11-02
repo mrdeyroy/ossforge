@@ -33,7 +33,9 @@ class DailyLimiter:
             raise InvalidState("daily PR ledger has invalid date") from exc
         if stored > date.today():
             raise InvalidState("daily PR ledger is from a future date; inspect the host clock/state")
-        return d if d["day"] == today else {"day": today, "count": 0}
+        # fromisoformat also accepts compact/week dates on supported runtimes.
+        # Compare parsed days, not spellings: an alias for today is no rollover.
+        return {"day": today, "count": d["count"] if stored == date.today() else 0}
 
     def remaining(self) -> int:
         return max(0, self.cap - self._load()["count"])
