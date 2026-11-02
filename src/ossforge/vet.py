@@ -44,13 +44,17 @@ def is_issue_claimed(
     *,
     now: datetime | None = None,
     max_age_days: int = CLAIM_EXPIRY_DAYS,
+    total_comments: int | None = None,
 ) -> bool:
     """Check whether any comment makes an active claim on an issue.
 
     Claims decay and expire after `max_age_days` (default 14 days) of inactivity
     by the claimant. If the claimant posted subsequent comments within the window,
-    the claim remains active. If timestamps are absent or unparseable, claims are
-    conservatively retained as active.
+    the claim remains active.
+
+    Conservative fallbacks retain claims as active when:
+    - Timestamps are absent or unparseable on any comment by the claimant.
+    - Comment activity sample is incomplete (total_comments > len(comments)).
     """
     if not comments:
         return False
@@ -64,22 +68,37 @@ def is_issue_claimed(
     if not claim_comments:
         return False
 
+    # If the activity sample is incomplete, later pages may contain recent claimant activity.
+    if total_comments is not None and total_comments > len(comments):
+        return True
+
     user_latest_time: dict[str, datetime] = {}
+    user_has_invalid_time: set[str] = set()
+
     for c in comments:
         user = c.get("user")
         login = user.get("login") if isinstance(user, dict) else None
-        c_time = _parse_comment_time(c.get("updated_at") or c.get("created_at"))
-        if login and c_time:
+        if not login:
+            continue
+        c_time_raw = c.get("updated_at") or c.get("created_at")
+        c_time = _parse_comment_time(c_time_raw)
+        if c_time is None:
+            user_has_invalid_time.add(login)
+        else:
             if login not in user_latest_time or c_time > user_latest_time[login]:
                 user_latest_time[login] = c_time
 
     for claim in claim_comments:
+        user = claim.get("user")
+        login = user.get("login") if isinstance(user, dict) else None
+
         claim_time = _parse_comment_time(claim.get("updated_at") or claim.get("created_at"))
         if claim_time is None:
             return True
 
-        user = claim.get("user")
-        login = user.get("login") if isinstance(user, dict) else None
+        if login and login in user_has_invalid_time:
+            return True
+
         last_activity = user_latest_time.get(login, claim_time) if login else claim_time
 
         age = ref_now - last_activity
@@ -160,7 +179,7 @@ def vet_issue(repo: str, number: int, repo_ok: bool = True) -> Verdict:
         return Verdict(f"{repo}#{number}", "skip", [restricted])
     issue = gh.api(f"repos/{repo}/issues/{number}")
     comments = gh.api(f"repos/{repo}/issues/{number}/comments") or []
-    claimed = is_issue_claimed(comments)
+    claimed = is_issue_claimed(comments, total_comments=issue.get("comments"))
     prs = gh.search_issues(f"repo:{repo} is:pr is:open #{number} in:body,title", per_page=10)
     files = policy_texts(repo)
     pol = policy.scan_files(files)

@@ -169,6 +169,34 @@ def test_is_issue_claimed_time_decay():
     ]
     assert vet.is_issue_claimed(fallback_claim, now=now)
 
+    # Same-author follow-up with missing/invalid timestamp must conservatively keep claim active
+    claim_with_undated_followup = [
+        {
+            "user": {"login": "user5"},
+            "body": "I'll take this issue!",
+            "created_at": "2020-01-01T00:00:00Z",
+        },
+        {
+            "user": {"login": "user5"},
+            "body": "Here is my progress update.",
+            "created_at": "invalid-date",
+        },
+    ]
+    assert vet.is_issue_claimed(claim_with_undated_followup, now=now)
+
+    # Incomplete activity sample (total_comments > len(comments)) must retain claim
+    stale_claim_sample = [
+        {
+            "user": {"login": "user6"},
+            "body": "I'll take this",
+            "created_at": "2020-01-01T00:00:00Z",
+        }
+    ]
+    # Complete sample: claim decays
+    assert not vet.is_issue_claimed(stale_claim_sample, now=now, total_comments=1)
+    # Incomplete sample: later pages could have recent claimant activity -> retain claim
+    assert vet.is_issue_claimed(stale_claim_sample, now=now, total_comments=45)
+
 
 def test_vet_issue_claim_decay_integration(monkeypatch):
     from ossforge import gh, repo_access
@@ -176,7 +204,7 @@ def test_vet_issue_claim_decay_integration(monkeypatch):
     monkeypatch.setattr(vet, "policy_texts", lambda repo: {"CONTRIBUTING.md": "Please test your code."})
     monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [])
 
-    # Case 1: Issue with a 30-day-old claim comment -> approved (claim expired)
+    # Case 1: Issue with a 30-day-old claim comment and complete sample (comments=1) -> approved
     def api_stale(path, **kw):
         if path.endswith("/comments"):
             return [
@@ -188,6 +216,7 @@ def test_vet_issue_claim_decay_integration(monkeypatch):
             ]
         return {
             "assignees": [],
+            "comments": 1,
             "body": "Steps to reproduce:\n1. Run the test command.\n2. Observe the expected error traceback.",
         }
 
@@ -195,6 +224,27 @@ def test_vet_issue_claim_decay_integration(monkeypatch):
     v1 = vet.vet_issue("owner/repo", 1)
     assert v1.decision == "approve"
     assert "claimed in comments" not in v1.reasons
+
+    # Case 2: Issue with a 30-day-old claim comment but incomplete sample (comments=50) -> skipped
+    def api_incomplete(path, **kw):
+        if path.endswith("/comments"):
+            return [
+                {
+                    "user": {"login": "ghost_dev"},
+                    "body": "I'll take this",
+                    "created_at": "2020-01-01T00:00:00Z",
+                }
+            ]
+        return {
+            "assignees": [],
+            "comments": 50,
+            "body": "Steps to reproduce:\n1. Run the test command.\n2. Observe the expected error traceback.",
+        }
+
+    monkeypatch.setattr(gh, "api", api_incomplete)
+    v2 = vet.vet_issue("owner/repo", 2)
+    assert v2.decision == "skip"
+    assert "claimed in comments" in v2.reasons
 
     # Case 2: Issue with a fresh claim comment (no date -> active fallback) -> skipped
     def api_fresh(path, **kw):

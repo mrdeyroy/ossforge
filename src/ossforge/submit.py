@@ -152,7 +152,7 @@ def _source_work_gate(it: Item) -> None:
         refs = gh.search_issues(f"repo:{it.repo} is:pr #{number} in:body,title", per_page=100, fresh=True, require_complete=True)
         if any(len(rows) >= 100 for rows in (comments, timeline, refs)):
             raise Refused("source activity sample saturated; review complete activity before publication")
-        if source.get("assignees") or vet.is_issue_claimed(comments):
+        if source.get("assignees") or vet.is_issue_claimed(comments, total_comments=source.get("comments")):
             raise Refused("source issue assigned or claimed; review active work before publication")
         linked = [e.get("source", {}).get("issue", {}) for e in timeline if e.get("event") == "cross-referenced"]
         if any("pull_request" in r for r in refs + linked):
