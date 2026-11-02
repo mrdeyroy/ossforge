@@ -526,3 +526,17 @@ def test_partial_audit_cannot_erase_valid_open_history(world):
     with pytest.raises(submit.Refused, match='audit'):
         run(world, execute=True)
     assert writes(world['log']) == []
+
+
+def test_new_policy_template_not_hidden_by_cached_snapshot_listing(world, monkeypatch):
+    import base64
+    path = '.github/PULL_REQUEST_TEMPLATE.md'
+    monkeypatch.setattr(gh, 'existing_files', lambda repo, paths, *, fresh=False, strict=False: [path] if fresh and strict else [])
+    original = gh.api
+    monkeypatch.setattr(gh, 'api', lambda endpoint, **kw: {
+        'encoding': 'base64', 'content': base64.b64encode(b'Human input is required.').decode(),
+        'sha': 'new-template', 'html_url': 'https://github.com/acme/lib/blob/main/' + path,
+    } if endpoint.endswith('/contents/' + path) else original(endpoint, **kw))
+    with pytest.raises(submit.Refused, match='changed since the review'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
