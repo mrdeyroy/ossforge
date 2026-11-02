@@ -128,7 +128,18 @@ def commit(cfg: Config, cwd: str, message: str, paths: list[str] | None = None) 
     require(check_login(cfg) + check_worktree(cfg, cwd))
     # stage what the assistant changed, never build/venv artifacts a package install leaves in the tree
     spec = list(paths) if paths else [".", *(f":(exclude,glob){a}" for a in ARTIFACTS)]
-    subprocess.run(["git", "add", "-A", "--", *spec], cwd=cwd, check=True)
+    listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *spec],
+                            cwd=cwd, capture_output=True, text=True)
+    if listed.returncode:
+        raise IdentityError(listed.stderr.strip() or "could not list intended source paths")
+    selected = list(dict.fromkeys(p for p in listed.stdout.split("\0") if p))
+    if not selected:
+        raise IdentityError("no non-artifact source paths to stage")
+    # Explicit files avoid git add's ignored-directory error for excluded build trees.
+    staged = subprocess.run(["git", "--literal-pathspecs", "add", "-A", "--", *selected],
+                            cwd=cwd, capture_output=True, text=True)
+    if staged.returncode:
+        raise IdentityError(staged.stderr.strip() or "git staging failed; inspect the index before retry")
     p = subprocess.run(["git", "commit", "-q", "-m", message], cwd=cwd, capture_output=True, text=True)
     if p.returncode:
         raise IdentityError(p.stderr.strip() or p.stdout.strip() or "git commit failed")

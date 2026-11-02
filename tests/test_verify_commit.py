@@ -232,3 +232,33 @@ def test_added_source_symlink_is_not_replaced_with_regular_file(tmp_path, monkey
     result = verify.verify_fix(r, base, Path(sys.executable), [], test_command=[sys.executable, 'test_alias.py'])
     assert (r / 'alias.py').is_symlink(), result.log
     assert not sh(r, 'git', 'status', '--porcelain')
+
+
+def test_commit_ignored_build_directories_do_not_break_staging(tmp_path, monkeypatch):
+    r = _repo(tmp_path, monkeypatch)
+    cfg = Config(github_user='me', git_name='Owner', git_email='o@example.invalid')
+    monkeypatch.setattr(identity, 'check_login', lambda c: [])
+    assert not identity.apply_local(cfg, str(r))
+    (r / '.gitignore').write_text('build/\n.pytest_cache/\n')
+    (r / 'build').mkdir()
+    (r / 'build' / 'object.o').write_bytes(b'object')
+    (r / '.pytest_cache').mkdir()
+    (r / '.pytest_cache' / 'cache').write_text('cache')
+    (r / 'm.py').write_text('def f():\n    return 2\n')
+    identity.commit(cfg, str(r), 'fix: real source')
+    files = sh(r, 'git', 'show', '--name-only', '--format=', 'HEAD').splitlines()
+    assert 'm.py' in files
+    assert not any(f.startswith(('build/', '.pytest_cache/')) for f in files)
+
+
+def test_commit_explicit_file_list_keeps_deletions_and_literal_names(tmp_path, monkeypatch):
+    r = _repo(tmp_path, monkeypatch)
+    cfg = Config(github_user='me', git_name='Owner', git_email='o@example.invalid')
+    monkeypatch.setattr(identity, 'check_login', lambda c: [])
+    assert not identity.apply_local(cfg, str(r))
+    (r / 'm.py').unlink()
+    (r / 'literal[1].py').write_text('value = 1\n')
+    identity.commit(cfg, str(r), 'fix: rename source')
+    assert not sh(r, 'git', 'status', '--porcelain')
+    assert 'literal[1].py' in sh(r, 'git', 'ls-tree', '--name-only', 'HEAD')
+    assert 'm.py' not in sh(r, 'git', 'ls-tree', '--name-only', 'HEAD').splitlines()
