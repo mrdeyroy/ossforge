@@ -27,6 +27,8 @@ GH_SHIM = textwrap.dedent('''\
             reply(200, {"login": os.environ["FAKE_GH_LOGIN"]})
         if path == "search/issues":
             reply(200, {"total_count": 0, "items": []})
+        if path == "repos/acme/lib/contents":
+            reply(200, [])
         if path == "repos/acme/lib/issues/11":
             reply(200, {"state": "open", "html_url": "https://github.com/acme/lib/issues/11"})
         if path in ("repos/acme/lib/issues/11/comments", "repos/acme/lib/issues/11/timeline"):
@@ -206,7 +208,7 @@ def test_signoff_added_only_where_approved_and_under_verified_identity(world):
 
 def test_repo_that_asks_for_dco_is_refused_until_approved(world, monkeypatch):
     from ossforge import vet
-    monkeypatch.setattr(vet, "policy_texts", lambda repo: {"CONTRIBUTING.md": "All commits need a Signed-off-by (DCO)."})
+    monkeypatch.setattr(vet, "policy_texts", lambda repo, **kw: {"CONTRIBUTING.md": "All commits need a Signed-off-by (DCO)."})
     with pytest.raises(submit.Refused, match="asks for a DCO"):
         run(world, execute=True)
     assert writes(world["log"]) == []
