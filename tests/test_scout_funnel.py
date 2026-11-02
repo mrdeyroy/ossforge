@@ -87,3 +87,45 @@ def test_star_metadata_rate_limit_stops_pass(monkeypatch, tmp_path):
     monkeypatch.setattr(gh, "api", lambda *a, **k: (_ for _ in ()).throw(gh.RateLimited("cooldown", 429, 60)))
     assert scout.scout(_cfg(tmp_path)) == []
     assert scout.explain_funnel(scout.LAST_FUNNEL).startswith("STOPPED EARLY")
+
+
+def test_features_aggregates_funnel_and_stops_on_rate_limit(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_scout(*args, **kwargs):
+        calls.append(args[3])
+        scout.LAST_FUNNEL.clear()
+        scout.LAST_FUNNEL.update(fetched=1, kept=0, approved=0, spam=1,
+                                stopped="cooldown" if len(calls) == 2 else "")
+        return []
+
+    monkeypatch.setattr(scout, "scout", fake_scout)
+    assert scout.scout_features(_cfg(tmp_path)) == []
+    assert calls == scout.FEATURE_LABELS[:2]
+    assert scout.LAST_FUNNEL["fetched"] == 2
+    assert scout.LAST_FUNNEL["spam"] == 2
+    assert scout.LAST_FUNNEL["stopped"] == "cooldown"
+    assert scout.explain_funnel(scout.LAST_FUNNEL).startswith("STOPPED EARLY")
+
+
+def test_features_empty_searches_are_no_matches(monkeypatch, tmp_path):
+    monkeypatch.setattr(gh, "search_issues", lambda *a, **k: [])
+    assert scout.scout_features(_cfg(tmp_path)) == []
+    assert scout.LAST_FUNNEL["fetched"] == 0
+    assert scout.LAST_FUNNEL["stopped"] == ""
+    assert scout.explain_funnel(scout.LAST_FUNNEL).startswith("NO MATCHES")
+
+
+def test_features_does_not_query_another_label_after_stop(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_scout(*args, **kwargs):
+        calls.append(args[3])
+        scout.LAST_FUNNEL.clear()
+        scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0, stopped="rate limit")
+        return []
+
+    monkeypatch.setattr(scout, "scout", fake_scout)
+    assert scout.scout_features(_cfg(tmp_path)) == []
+    assert calls == scout.FEATURE_LABELS[:1]
+    assert scout.LAST_FUNNEL["stopped"] == "rate limit"
