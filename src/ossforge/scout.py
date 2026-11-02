@@ -209,7 +209,7 @@ def scout(
                 if acc.status == "none-observed":  # shown, never a filter: the sample is finite and biased
                     v = vet.Verdict(v.issue, v.decision, v.reasons + ["caution: " + acc.reasons[0]])
         except (gh.RateLimited, gh.ReadBudgetExceeded) as e:
-            f["stopped"] = f"GitHub read deadline or rate limit while vetting {repo} ({e}); {len(items) - f['kept']} issues not examined"
+            f["stopped"] = f"GitHub read deadline or rate limit while vetting {repo} ({e}); {len(items) - _index} issues not examined"
             break
         sc, why = score_issue(it, rs.score + boost)
         hay = f"{it['title']} {it.get('body') or ''}".lower()

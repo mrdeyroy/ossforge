@@ -69,7 +69,13 @@ def test_existing_clone_is_never_deleted_or_recloned(tmp_path, monkeypatch):
     dest = tmp_path / 'example__project'
     dest.mkdir()
     (dest / 'work').write_text('keep')
-    monkeypatch.setattr(hunt.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, str(dest) + '\n', ''))
+    (dest / '.git').mkdir()
+    (dest / '.git' / 'index').write_bytes(b'controlled index placeholder')
+    def probe(cmd, **kw):
+        assert cmd[:2] != ['git', 'clone']
+        out = str(dest) + '\n' if '--show-toplevel' in cmd else '.git/index\n' if '--git-path' in cmd else ''
+        return subprocess.CompletedProcess(cmd, 0, out, '')
+    monkeypatch.setattr(hunt.subprocess, 'run', probe)
     monkeypatch.setattr(hunt.identity, 'check_upstream', lambda *a: [])
     assert hunt.clone(Config(work_dir=str(tmp_path)), 'example/project') == dest
     assert (dest / 'work').read_text() == 'keep'
@@ -88,13 +94,14 @@ def test_unrelated_existing_directory_refused_and_preserved(tmp_path, wrong_remo
     assert (dest / 'work').read_text() == 'keep existing bytes'
 
 
-def test_existing_correct_root_reused_without_rewriting_dirty_files(tmp_path):
+def test_existing_correct_root_incomplete_work_refused_without_rewriting(tmp_path):
     dest = tmp_path / 'example__project'
     dest.mkdir()
     subprocess.run(['git', 'init', '-q'], cwd=dest, check=True)
     subprocess.run(['git', 'remote', 'add', 'origin', 'https://github.com/example/project.git'], cwd=dest, check=True)
     (dest / 'work').write_text('uncommitted existing work')
-    assert hunt.clone(Config(work_dir=str(tmp_path)), 'example/project') == dest
+    with pytest.raises(RuntimeError, match='index|incomplete'):
+        hunt.clone(Config(work_dir=str(tmp_path)), 'example/project')
     assert (dest / 'work').read_text() == 'uncommitted existing work'
 
 
