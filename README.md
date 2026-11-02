@@ -481,3 +481,8 @@ verification receipt and the reviewed upstream item revision (PR head/base inclu
 Any candidate or upstream change invalidates it. Every publication boundary re-reads
 reviewed matches; unreadable sources refuse publication. New matches and recent-commit
 hits still block. It is not a general approval of a repository or a claim of novelty.
+
+For a recent-commit keyword false positive, inspect the complete commit first, then use
+`ossforge review-commit-match ITEM FULL_SHA --reason "different API/cause"`.
+It binds the same candidate receipt/text to one immutable commit SHA/tree/parents;
+new commit hits and candidate changes still block, and each read must succeed.

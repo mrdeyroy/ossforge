@@ -173,6 +173,9 @@ def _duplicate_gate(it: Item, cfg: Config | None = None) -> None:
             raise Refused("duplicate found: " + ", ".join(f"#{m.number}({m.state})" for m in ms[:3]))
         for path in paths:
             recent = dedupe.recent_commit_hits(it.repo, path, sorted(dedupe.tokens(it.issue_title))[:6], strict=True)
+            if cfg is not None:
+                recent = [url for url in recent if not duplicate_reviews.unchanged_commit(
+                    cfg.path("duplicate_reviews.json"), it, url)]
             if recent:
                 raise Refused(f"recent commit already touches this: {recent[0]}")
     except (dedupe.Incomplete, gh.GhError, ValueError) as exc:

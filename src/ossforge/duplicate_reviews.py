@@ -46,3 +46,38 @@ def unchanged(path: Path, it: Item, number: int) -> bool:
     if not isinstance(record, dict) or record.get("candidate") != candidate(it) or not record.get("reason"):
         return False
     return record.get("upstream") == snapshot(it.repo, number)
+
+
+def commit_snapshot(repo: str, sha: str) -> dict:
+    import re
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("review requires the full commit SHA")
+    data = gh.api(f"repos/{repo}/commits/{sha}", fresh=True)
+    if data.get("sha") != sha or data.get("html_url") != f"https://github.com/{repo}/commit/{sha}":
+        raise ValueError("commit does not match the target repository and SHA")
+    # Immutable SHA plus tree and parents identify the exact reviewed code, not a moving tip.
+    tree = data.get("commit", {}).get("tree", {}).get("sha")
+    if not tree:
+        raise ValueError("reviewed commit tree unavailable")
+    return {"sha": sha, "tree": tree, "parents": [p["sha"] for p in data.get("parents", [])]}
+
+
+def record_commit(path: Path, it: Item, sha: str, reason: str) -> None:
+    if it.status != "verified" or not it.verification or not reason.strip():
+        raise ValueError("verify the candidate and provide a specific non-duplicate reason first")
+    data = issue_reviews.load(path)
+    data[f"{it.repo.lower()}@{sha}:{it.id}"] = {
+        "candidate": candidate(it), "upstream": commit_snapshot(it.repo, sha), "reason": reason.strip()
+    }
+    issue_reviews._save(path, data)
+
+
+def unchanged_commit(path: Path, it: Item, url: str) -> bool:
+    prefix = f"https://github.com/{it.repo}/commit/"
+    if not url.startswith(prefix):
+        return False
+    sha = url[len(prefix):]
+    record = issue_reviews.load(path).get(f"{it.repo.lower()}@{sha}:{it.id}", {})
+    if not isinstance(record, dict) or record.get("candidate") != candidate(it) or not record.get("reason"):
+        return False
+    return record.get("upstream") == commit_snapshot(it.repo, sha)

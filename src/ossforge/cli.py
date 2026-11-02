@@ -56,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     dr = add("review-duplicate", "record one reviewed false positive for this exact verified candidate", "id")
     dr.add_argument("number", type=int)
     dr.add_argument("--reason", required=True)
+    dc = add("review-commit-match", "record one inspected unrelated commit for an exact verified candidate", "id", "sha")
+    dc.add_argument("--reason", required=True)
     add("prepare", "set this work tree's own git author/committer to the configured identity (local config only)", "id")
     cm = add("commit", "identity-checked git commit in an item's clone", "id")
     cm.add_argument("-m", "--message", required=True)
@@ -197,6 +199,13 @@ def main(argv: list[str] | None = None) -> int:
             print("REFUSED:", exc)
             return 1
         print("reviewed only this candidate/item revision; all other duplicate and commit gates remain active")
+    elif a.cmd == "review-commit-match":
+        try:
+            duplicate_reviews.record_commit(cfg.path("duplicate_reviews.json"), q.items[a.id], a.sha, a.reason)
+        except (ValueError, gh.GhError) as exc:
+            print("REFUSED:", exc)
+            return 1
+        print("reviewed only this exact candidate and immutable commit; other commit matches still block")
     elif a.cmd == "prepare":
         bad = identity.apply_local(cfg, q.items[a.id].clone)
         print("READY: this clone commits as the configured identity" if not bad else "NOT READY: " + "; ".join(bad))
