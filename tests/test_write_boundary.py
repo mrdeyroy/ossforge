@@ -619,3 +619,37 @@ def test_false_positive_review_rechecked_before_first_write(world):
     with pytest.raises(submit.Refused, match='duplicate found'):
         run(world, execute=True)
     assert len(seen) == 2 and writes(world['log']) == []
+
+
+@pytest.mark.parametrize('change', ['none', 'candidate', 'new-hit', 'unavailable'])
+def test_commit_false_positive_review_is_exact_and_rechecked(world, change):
+    from ossforge import dedupe, duplicate_reviews
+    it, cfg, mp = world['it'], world['cfg'], world['mp']
+    sha = 'a' * 40
+    url = f'https://github.com/acme/lib/commit/{sha}'
+    original = gh.api
+    unavailable = []
+    def api(endpoint, **kw):
+        if endpoint == f'repos/acme/lib/commits/{sha}':
+            if unavailable:
+                raise gh.GhError('unavailable')
+            return dict(sha=sha, html_url=url, commit={'tree': {'sha': 'tree'}}, parents=[])
+        return original(endpoint, **kw)
+    mp.setattr(gh, 'api', api)
+    hits = [url]
+    mp.setattr(dedupe, 'recent_commit_hits', lambda *a, **k: hits)
+    with pytest.raises(submit.Refused, match='recent commit'):
+        run(world)
+    duplicate_reviews.record_commit(cfg.path('duplicate_reviews.json'), it, sha, 'Decoder NUL check, not encoder Unicode')
+    if change == 'candidate':
+        it.pr_body += ' changed'
+    elif change == 'new-hit':
+        hits.append('https://github.com/acme/lib/commit/' + 'b' * 40)
+    elif change == 'unavailable':
+        unavailable.append(1)
+    if change == 'none':
+        run(world)
+    else:
+        with pytest.raises(submit.Refused):
+            run(world, execute=True)
+        assert writes(world['log']) == []
