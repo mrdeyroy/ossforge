@@ -176,7 +176,9 @@ def scout_features(cfg: Config, stats: Stats | None = None, language: str | None
     for lb in FEATURE_LABELS[:2]:
         res += scout(cfg, stats, language, lb, limit, kind="feature", skip_repos=skip_repos)
         for k, v in LAST_FUNNEL.items():
-            total[k] = f"{total[k]}; {v}".strip("; ") if k == "stopped" else total.get(k, 0) + v
+            total[k] = f"{total.get(k, '')}; {v}".strip("; ") if k == "stopped" else total.get(k, 0) + v
+        if LAST_FUNNEL.get("stopped"):
+            break
     LAST_FUNNEL.clear()
     LAST_FUNNEL.update(total)
     seen: set[tuple[str, int]] = set()
