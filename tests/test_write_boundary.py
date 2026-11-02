@@ -408,9 +408,13 @@ def test_closed_source_issue_stops_before_writes(world):
 
 
 @pytest.mark.parametrize('activity', ['claim', 'draft', 'merged', 'saturated', 'unavailable'])
-def test_source_activity_blocks_competing_work_before_writes(world, activity):
+@pytest.mark.parametrize('existing', [False, True])
+def test_source_activity_blocks_competing_work_before_writes(world, activity, existing):
     original = gh.api
-    world['it'].source_issue = 42
+    if existing:
+        world['it'].submitted = {'issue_url': 'https://github.com/acme/lib/issues/42'}
+    else:
+        world['it'].source_issue = 42
     def api(path, /, **kw):
         if path.endswith('/issues/42'):
             return {'state': 'open', 'html_url': 'https://github.com/acme/lib/issues/42'}
