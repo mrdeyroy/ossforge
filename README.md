@@ -423,3 +423,10 @@ This does not coordinate separate state directories or make remote GitHub writes
 and local persistence one atomic transaction. A crash after a successful remote
 write but before its URL is saved still requires operator reconciliation; do not
 blindly retry an unknown remote outcome.
+
+`discovery_read_budget_seconds` (default120) adds a cooperative deadline for the
+GitHub-read discovery phase, including cache reads, per-request timeout reduction
+and refusing pacing/retry sleeps that cannot fit. An exhausted phase preserves
+partial findings and reports stopped/partial, not a complete no-find result.
+This is not a hard whole-loop deadline: lock contention, filesystem work, patrol,
+clone/hunt, external commands, tests and publication are outside this phase.

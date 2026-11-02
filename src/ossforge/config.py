@@ -25,6 +25,7 @@ class Config:
     preferred_repos: list[str] = field(default_factory=list)  # affinity, not permission or a quality guarantee
     skills: list[str] = field(default_factory=list)  # deterministic ranking hints only
     recent_issue_days: int = 7  # discover hides unchanged surfaced approvals temporarily; scout is unchanged
+    discovery_read_budget_seconds: float = 120  # cooperative GitHub-read phase budget, not whole-run timeout
     discovery_strategy: str = "broad"  # loop: broad preserves original behavior; rotate opts into affinity
     labels: list[str] = field(default_factory=lambda: ["help wanted", "good first issue"])
     max_open_prs_per_repo: int = 1
