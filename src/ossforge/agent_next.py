@@ -63,6 +63,12 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
     if remaining > 0:
         return result("wait_for_cooldown", retry_after_seconds=math.ceil(remaining),
                       retry_at_epoch=until, reason="recorded GitHub cooldown; do not search or change accounts to bypass it")
+    pending = [i for i in queue.by_status("found") if i.kind == "issue" and i.source_issue and not i.clone]
+    if pending:
+        return result("recover_issue_handoff",
+                      pending=[{"id": i.id, "repo": i.repo, "source_issue": i.source_issue} for i in pending],
+                      next_argv=prefix + ["loop", "--once", "--prepare-only"],
+                      warning="inspect interrupted checkouts first; preserve all files; recovery rechecks current vetting before cloning and never patches or publishes")
     try:
         last = json.loads(cfg.path("run.json").read_text())
         if not isinstance(last, dict):
