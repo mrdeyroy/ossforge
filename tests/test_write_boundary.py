@@ -508,3 +508,21 @@ def test_fetch_without_rebase_still_requires_updated_base(world):
     with pytest.raises(submit.Refused, match='upstream'):
         run(world, execute=True)
     assert writes(world['log']) == []
+
+
+@pytest.mark.parametrize('contents', ['{partial\n', '[]\n', 'null\n', '{"event":"pr_opened"}\n', '{"event":"pr_state","repo":"acme/lib","pr":1}\n'])
+def test_invalid_audit_history_blocks_before_any_publication_checks(world, contents):
+    world['audit'].path.write_text(contents)
+    before = world['audit'].path.read_bytes()
+    with pytest.raises(submit.Refused, match='audit'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+    assert world['audit'].path.read_bytes() == before
+
+
+def test_partial_audit_cannot_erase_valid_open_history(world):
+    valid = json.dumps({'event': 'pr_opened', 'repo': 'acme/lib', 'pr': 9, 'ts': 1}) + '\n'
+    world['audit'].path.write_text(valid + '{partial\n')
+    with pytest.raises(submit.Refused, match='audit'):
+        run(world, execute=True)
+    assert writes(world['log']) == []

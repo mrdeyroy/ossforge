@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -87,9 +88,26 @@ class Audit:
 
     def read(self) -> list[dict]:
         try:
-            return [json.loads(x) for x in self.path.read_text(encoding="utf-8").splitlines() if x.strip()]
-        except (OSError, ValueError):
+            records = [json.loads(x) for x in self.path.read_text(encoding="utf-8").splitlines() if x.strip()]
+        except FileNotFoundError:
             return []
+        except (OSError, ValueError) as exc:
+            raise Blocked("audit history unreadable; recover it before publishing") from exc
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("event"), str) or not record["event"]:
+                raise Blocked("audit history invalid; recover it before publishing")
+            if record["event"] in ("pr_opened", "pr_state"):
+                if (not isinstance(record.get("repo"), str) or not record["repo"]
+                        or type(record.get("pr")) is not int or record["pr"] <= 0):
+                    raise Blocked("audit PR history invalid; recover it before publishing")
+                if record.get("state", "open") not in ("open", "merged", "closed_unmerged"):
+                    raise Blocked("audit PR state invalid; recover it before publishing")
+                if record["event"] == "pr_state" and "state" not in record:
+                    raise Blocked("audit PR state missing; recover it before publishing")
+                if record["event"] == "pr_opened" and (type(record.get("ts")) not in (int, float)
+                        or not math.isfinite(record["ts"]) or record["ts"] < 0):
+                    raise Blocked("audit PR timestamp invalid; recover it before publishing")
+        return records
 
     def update_state(self, repo: str, pr: int, state: str) -> None:
         """Outcome changes are recorded as new events; the latest wins when read by `current_state`."""
