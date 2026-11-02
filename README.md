@@ -377,3 +377,13 @@ progress records those effects. Every PR created in strict admission mode is a
 This is a narrow live scope gate, not ContribAI's full run lifecycle, expiring
 permit, risk engine or signed evidence service. It requires no model key and does
 not grant us or any other assistant permission to act for the operator.
+
+### Operational timing limits
+
+`loop --interval-hours N` sleeps after each completed pass, not on a fixed wall-clock schedule.
+The interval must be finite and at least one second (the default is six hours).
+GitHub API read subprocesses time out after 120 seconds; a new clone times out after
+300 seconds and its partial checkout is removed before retry. These are individual
+operation bounds, not a deadline for an entire discovery pass, verification, external
+patch command or contribution. A pass may perform multiple reads and rate-limit waits.
+CLI results and the local digest are not push notifications, and a loop needs a running host.

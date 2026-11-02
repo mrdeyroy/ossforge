@@ -4,6 +4,7 @@ import argparse
 import shlex
 import dataclasses
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -20,6 +21,16 @@ def _ctx(cfg: Config):
     gh.configure(cfg.path("cache"), cfg.cache_ttl_seconds)
     return (Queue(cfg.path("queue.json")), safety.Audit(cfg.path("audit.jsonl")),
             Stats(cfg.path("stats.json")), DailyLimiter(cfg.path("daily.json"), cfg.cap))
+
+
+def positive_interval(value: str) -> float:
+    try:
+        hours = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("interval must be finite and at least one second") from exc
+    if not math.isfinite(hours) or hours < 1 / 3600:
+        raise argparse.ArgumentTypeError("interval must be finite and at least one second")
+    return hours
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("pr", type=int)
     add("patrol", "check our open PRs and say what each needs")
     add("digest", "write and print the daily digest")
-    lp = add("loop", "run the research loop", once={"action": "store_true"}, interval_hours={"type": float, "default": 6})
+    lp = add("loop", "run the research loop", once={"action": "store_true"}, interval_hours={"type": positive_interval, "default": 6})
     lp.set_defaults()
     add("doctor", "check git, gh, ruff and config before the first run")
     add("bootstrap", "import your merged/closed PR history to personalise scouting")

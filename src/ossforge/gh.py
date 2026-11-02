@@ -207,7 +207,10 @@ def api(path: str, /, *, fresh: bool = False, **params: Any) -> Any:
         cmd += ["-f", f"{k}={v}"]
     for attempt in range(MAX_RETRIES + 1):
         _budget(path)
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            raise GhError("GitHub API read timed out after 120 seconds; retry later") from exc
         time.sleep(PACING_S)
         headers, body = split_response(p.stdout)
         if p.returncode == 0:
