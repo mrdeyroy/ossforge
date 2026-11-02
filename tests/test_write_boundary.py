@@ -293,3 +293,36 @@ def test_strict_admission_revoked_after_preflight_stops_first_write(world, monke
     with pytest.raises(submit.Refused, match='revoked'):
         run(world, execute=True)
     assert writes(world['log']) == []
+
+
+def test_resumed_issue_cannot_bypass_exhausted_pr_cap(world):
+    cfg, it, lim, aud, log = (world[k] for k in ("cfg", "it", "lim", "audit", "log"))
+    it.submitted = {'issue_url': 'https://github.com/acme/lib/issues/11'}
+    lim.record()
+    lim.record()
+    with pytest.raises(submit.Refused, match='daily PR cap'):
+        submit.submit(it, lim, cfg, aud, execute=True)
+    calls = [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []
+    assert not any(c[:2] == ['pr', 'create'] for c in calls)
+
+
+def test_cap_rechecked_after_partial_writes_before_pr_creation(world):
+    def exhausted_after_push(cmd, cwd=None):
+        value = original(cmd, cwd)
+        if cmd[:2] == ['git', 'push']:
+            world['lim'].record()
+            world['lim'].record()
+        return value
+    original = submit._run
+    world['mp'].setattr(submit, '_run', exhausted_after_push)
+    with pytest.raises(submit.Refused, match='daily PR cap'):
+        run(world, execute=True)
+    assert not any(c[:2] == ['pr', 'create'] for c in writes(world['log']))
+
+
+def test_completed_pr_resume_does_not_create_another_pr_at_cap(world):
+    first = run(world, execute=True)
+    world['it'].submitted = {'issue_url': first['issue'], 'fork_pushed': True, 'pr_url': first['pr']}
+    world['lim'].record()
+    assert run(world, execute=True)['pr'] == first['pr']
+    assert sum(c[:2] == ['pr', 'create'] for c in writes(world['log'])) == 1
