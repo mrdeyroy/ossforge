@@ -273,7 +273,7 @@ def api(path: str, /, *, fresh: bool = False, **params: Any) -> Any:
 
 def search_issues(q: str, per_page: int = 30, sort: str = "updated", fresh: bool = False, require_complete: bool = False) -> list[dict]:
     result = api("search/issues", fresh=fresh, q=q, per_page=per_page, sort=sort, order="desc")
-    if require_complete and (result.get("incomplete_results") or result.get("total_count", 0) > len(result["items"])):
+    if require_complete and ("total_count" not in result or result.get("incomplete_results") or result["total_count"] > len(result["items"])):
         raise GhError("search coverage incomplete; narrow and review before publication")
     return result["items"]
 
