@@ -414,3 +414,12 @@ external-command attempt and actual verification. Publication is off unless
 `--publish` is explicitly authorized. See the local workflow for the JSON-file
 contract, timeout/daily-attempt semantics, recovery and security limitations.
 It is not a token budget, sandbox, cloud service or validated Claude adapter.
+
+Publication also takes a nonblocking `.state/publication.lock`, including direct
+`submit --yes` calls. A competing same-state call refuses before writes. After
+acquiring the lock, submission reloads saved queue progress and persists each
+completed remote step before continuing, so a stale caller resumes that progress.
+This does not coordinate separate state directories or make remote GitHub writes
+and local persistence one atomic transaction. A crash after a successful remote
+write but before its URL is saved still requires operator reconciliation; do not
+blindly retry an unknown remote outcome.

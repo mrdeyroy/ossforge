@@ -326,3 +326,52 @@ def test_completed_pr_resume_does_not_create_another_pr_at_cap(world):
     world['lim'].record()
     assert run(world, execute=True)['pr'] == first['pr']
     assert sum(c[:2] == ['pr', 'create'] for c in writes(world['log'])) == 1
+
+
+def test_direct_submit_same_state_lock_refuses_before_writes(world):
+    import fcntl
+    path = world['cfg'].path('publication.lock')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(submit.Refused, match='another publication'):
+            run(world, execute=True)
+    assert writes(world['log']) == []
+    assert run(world, execute=True)['pr'].endswith('/12')
+
+
+def test_stale_direct_submit_reloads_partial_progress_after_interruption(world):
+    q = queue.Queue(world['cfg'].path('queue.json'))
+    q.add(world['it'])
+    q.save()
+    original = submit._run
+    def interrupted(cmd, cwd=None):
+        if cmd[:3] == ['gh', 'pr', 'create']:
+            raise submit.Refused('simulated interrupted before PR')
+        return original(cmd, cwd)
+    world['mp'].setattr(submit, '_run', interrupted)
+    with pytest.raises(submit.Refused, match='simulated interrupted'):
+        run(world, execute=True)
+    saved = queue.Queue(world['cfg'].path('queue.json')).items['a'].submitted
+    assert saved['issue_url'] and saved['fork_pushed']
+    world['it'].submitted = {}  # a second CLI loaded before the first persisted progress
+    world['mp'].setattr(submit, '_run', original)
+    assert run(world, execute=True)['pr'].endswith('/12')
+    calls = writes(world['log'])
+    assert sum(c[:2] == ['issue', 'create'] for c in calls) == 1
+    assert sum(c[:2] == ['pr', 'create'] for c in calls) == 1
+
+
+def test_second_stale_invocation_recovers_completed_urls_without_duplicates(world):
+    import copy
+    q = queue.Queue(world['cfg'].path('queue.json'))
+    q.add(world['it'])
+    q.save()
+    stale = copy.deepcopy(world['it'])
+    first = run(world, execute=True)
+    second = submit.submit(stale, world['lim'], world['cfg'], world['audit'], execute=True)
+    assert second['issue'] == first['issue'] and second['pr'] == first['pr']
+    calls = writes(world['log'])
+    assert sum(c[:2] == ['issue', 'create'] for c in calls) == 1
+    assert sum(c[:2] == ['pr', 'create'] for c in calls) == 1
+    assert world['lim'].remaining() == 1
