@@ -69,6 +69,40 @@ def test_existing_clone_is_never_deleted_or_recloned(tmp_path, monkeypatch):
     dest = tmp_path / 'example__project'
     dest.mkdir()
     (dest / 'work').write_text('keep')
-    monkeypatch.setattr(hunt.subprocess, 'run', lambda *a, **kw: pytest.fail('existing clone must not run'))
+    monkeypatch.setattr(hunt.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, str(dest) + '\n', ''))
+    monkeypatch.setattr(hunt.identity, 'check_upstream', lambda *a: [])
     assert hunt.clone(Config(work_dir=str(tmp_path)), 'example/project') == dest
     assert (dest / 'work').read_text() == 'keep'
+
+
+@pytest.mark.parametrize('wrong_remote', [False, True])
+def test_unrelated_existing_directory_refused_and_preserved(tmp_path, wrong_remote):
+    dest = tmp_path / 'example__project'
+    dest.mkdir()
+    (dest / 'work').write_text('keep existing bytes')
+    if wrong_remote:
+        subprocess.run(['git', 'init', '-q'], cwd=dest, check=True)
+        subprocess.run(['git', 'remote', 'add', 'origin', 'https://github.com/other/repo.git'], cwd=dest, check=True)
+    with pytest.raises(RuntimeError, match='checkout|origin'):
+        hunt.clone(Config(work_dir=str(tmp_path)), 'example/project')
+    assert (dest / 'work').read_text() == 'keep existing bytes'
+
+
+def test_existing_correct_root_reused_without_rewriting_dirty_files(tmp_path):
+    dest = tmp_path / 'example__project'
+    dest.mkdir()
+    subprocess.run(['git', 'init', '-q'], cwd=dest, check=True)
+    subprocess.run(['git', 'remote', 'add', 'origin', 'https://github.com/example/project.git'], cwd=dest, check=True)
+    (dest / 'work').write_text('uncommitted existing work')
+    assert hunt.clone(Config(work_dir=str(tmp_path)), 'example/project') == dest
+    assert (dest / 'work').read_text() == 'uncommitted existing work'
+
+
+def test_nested_directory_cannot_impersonate_parent_checkout(tmp_path):
+    subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
+    subprocess.run(['git', 'remote', 'add', 'origin', 'https://github.com/example/project.git'], cwd=tmp_path, check=True)
+    dest = tmp_path / 'example__project'
+    dest.mkdir()
+    with pytest.raises(RuntimeError, match='Git root'):
+        hunt.clone(Config(work_dir=str(tmp_path)), 'example/project')
+    assert dest.is_dir()
