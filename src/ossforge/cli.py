@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
-from . import discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
+from . import admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--" + f.replace("_", "-"), **kw)
         return p
 
+    add("consent-check", "read explicit maintainer admission, without executing or publishing", "repo", issue={"type": int, "default": 0})
     add("radar", "score a repo's health", "repo")
     prv = add("policy-review", "show a repo's policy docs (URLs, SHAs) and optionally record YOUR review before submitting", "repo")
     prv.add_argument("--accept", action="store_true", help="record that you read the docs and the repo's own pages")
@@ -70,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("hunt", "scan, rank, de-duplicate and enqueue", "repo")
     add("queue", "list queue items")
     vf = add("verify", "run the repo's tests with/without the fix, then mark verified", "id")
+    vf.add_argument("--consent-issue", type=int, default=0, help="existing maintainer-approved upstream issue for strict admission")
     vf.add_argument("--branch", required=True)
     vf.add_argument("--tests", nargs="+", default=[], help="pytest args selecting the new test")
     vf.add_argument("--test-command", help="explicit test argv parsed with shlex, never a shell; no auto install")
@@ -123,6 +125,14 @@ def main(argv: list[str] | None = None) -> int:
         for name, ok, detail in results:
             print(f"[{'ok' if ok else 'FIX'}] {name}: {detail}")
         return 0 if all(ok for _, ok, _ in results) else 1
+    elif a.cmd == "consent-check":
+        try:
+            result = admission.inspect(a.repo, a.issue)
+        except admission.Denied as e:
+            result = {"allowed": False, "reason": str(e)}
+            emit(result) if a.json else print("DENIED:", e)
+            return 1
+        emit(result) if a.json else print("maintainer intent:", result, "(not operator approval or policy clearance)")
     elif a.cmd == "bootstrap":
         r = profile.bootstrap(stats, cfg.github_user, cfg.own_orgs)
         print(f"{r['user']}: merged PRs in {r['merged_repos']} repos, closed unmerged in {r['closed_repos']} repos")
@@ -285,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         q.set(a.id, status="verified", branch=a.branch, issue_title=a.issue_title, pr_title=a.pr_title,
               issue_body=Path(a.issue_body_file).read_text(encoding="utf-8"),
-              pr_body=Path(a.pr_body_file).read_text(encoding="utf-8"), verification=r.evidence)
+              pr_body=Path(a.pr_body_file).read_text(encoding="utf-8"), verification=r.evidence, consent_issue=a.consent_issue)
         q.save()
         print("verified:", a.id)
     elif a.cmd == "reject":

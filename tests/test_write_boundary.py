@@ -8,7 +8,7 @@ import textwrap
 
 import pytest
 
-from ossforge import evidence, gh, policy_review, queue, safety, submit
+from ossforge import admission, evidence, gh, policy_review, queue, safety, submit
 from ossforge.config import Config
 from ossforge.limiter import DailyLimiter
 
@@ -268,5 +268,28 @@ def test_message_only_rewrite_keeps_evidence(world):
 def test_changed_base_invalidates_receipt(world):
     world['it'].verification['base'] = '0' * 40
     with pytest.raises(submit.Refused, match='verification evidence'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+
+
+def test_strict_admission_requires_live_consent_and_creates_draft(world, monkeypatch):
+    world['cfg'].maintainer_admission = True
+    monkeypatch.setattr(admission, 'inspect', lambda *a: dict(source='manifest', max_files=5, max_lines=250,
+                                                            allowed_dirs=[]))
+    result = run(world, execute=True)
+    assert result['pr'].endswith('/12')
+    assert '--draft' in writes(world['log'])[-1]
+
+
+def test_strict_admission_revoked_after_preflight_stops_first_write(world, monkeypatch):
+    world['cfg'].maintainer_admission = True
+    calls = []
+    def inspect(*args):
+        calls.append(1)
+        if len(calls) >= 3:
+            raise admission.Denied('revoked')
+        return dict(source='manifest', max_files=5, max_lines=250, allowed_dirs=[])
+    monkeypatch.setattr(admission, 'inspect', inspect)
+    with pytest.raises(submit.Refused, match='revoked'):
         run(world, execute=True)
     assert writes(world['log']) == []
