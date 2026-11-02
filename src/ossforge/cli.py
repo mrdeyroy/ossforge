@@ -119,6 +119,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
     cfg = load(a.config)
+    # Emergency controls must not depend on readable workflow state.
+    if a.cmd == "stop":
+        Path(cfg.kill_file).parent.mkdir(parents=True, exist_ok=True)
+        Path(cfg.kill_file).write_text("stopped\n")
+        print("kill switch on:", cfg.kill_file)
+        return 0
+    if a.cmd == "resume":
+        Path(cfg.kill_file).unlink(missing_ok=True)
+        print("kill switch off")
+        return 0
     q, audit, stats, limiter = _ctx(cfg)
     if getattr(a, "id", None) is not None and a.id not in q.items:
         print(f"unknown queue id {a.id!r}. Run `queue` to list ids.", file=sys.stderr)
@@ -127,14 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     def emit(obj) -> None:
         print(json.dumps(obj, indent=2, default=lambda o: dataclasses.asdict(o) if dataclasses.is_dataclass(o) else str(o)))
 
-    if a.cmd == "stop":
-        Path(cfg.kill_file).parent.mkdir(parents=True, exist_ok=True)
-        Path(cfg.kill_file).write_text("stopped\n")
-        print("kill switch on:", cfg.kill_file)
-    elif a.cmd == "resume":
-        Path(cfg.kill_file).unlink(missing_ok=True)
-        print("kill switch off")
-    elif a.cmd == "doctor":
+    if a.cmd == "doctor":
         results = doctor.check(cfg)
         if a.json:
             emit([{"check": n, "ok": ok, "detail": d} for n, ok, d in results])
