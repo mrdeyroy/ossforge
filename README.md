@@ -335,3 +335,45 @@ classifier. Cargo101, for example, can also mean a build failure; read the store
 logs and prove the intended assertion failed. Commands run with a scrubbed
 environment but are **not sandboxed**. Review repository scripts first; use
 separate isolation for untrusted code. No built-in paid model calls are added.
+
+### Optional maintainer admission (draft proposals only)
+
+For projects that explicitly invite automated proposals, set
+`maintainer_admission: true` in your local config. This adds a stricter admission
+gate; it does not replace your own approval, repository policy review, tested
+content receipt, identity checks, protected paths or duplicate checks. The normal
+default remains unchanged. This mode is independently implemented, inspired by
+ContribAI's separation of generation from maintainer admission, not copied code.
+
+A target maintainer may add `.github/ossforge.yml` on their default branch:
+
+```yaml
+version: 1
+enabled: true
+max_files: 5
+max_lines: 250
+allowed_dirs: [src, tests]
+```
+
+Only literal relative directory prefixes are supported, recursively beneath each
+prefix. No globs, unknown/duplicate keys or disabled/malformed manifests are
+accepted. File and added-plus-removed-line budgets are checked against the actual
+diff. Binary/ambiguous diffs fail closed. A missing manifest may instead use an
+open issue carrying the exact `ossforge-approved` label, selected by
+`verify --consent-issue NUMBER`; that route has a five-file/250-line budget and
+still applies the normal protected-path checks. An existing disabled/malformed
+manifest cannot be bypassed by an issue label. GitHub normally restricts label
+management to repository collaborators; the label is intent to receive a
+proposal, never acceptance of its code or authority to waive another policy.
+
+`ossforge consent-check owner/repo --issue NUMBER` is read-only. Admission checks
+fetch current upstream state without the local cache, in preflight, before the
+first write, before pushing and before creating the PR. Removing/closing the
+approval or disabling the manifest blocks later steps. Already-created issues or
+fork pushes remain if consent is revoked mid-workflow; the existing resumable
+progress records those effects. Every PR created in strict admission mode is a
+**draft**. Nothing signs a CLA or merges a PR.
+
+This is a narrow live scope gate, not ContribAI's full run lifecycle, expiring
+permit, risk engine or signed evidence service. It requires no model key and does
+not grant us or any other assistant permission to act for the operator.
