@@ -27,6 +27,16 @@ def clone(cfg: Config, repo: str) -> Path:
                 shutil.rmtree(dest)
             raise RuntimeError("clone timed out after 300 seconds; partial checkout removed, retry later") from exc
         identity.apply_local(cfg, str(dest))  # fresh clones commit as the owner from the start (local config only)
+    else:
+        # Existing paths can be interrupted clones, unrelated repositories, or
+        # directories inside a parent repository. Never scan them as this target.
+        probe = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=dest,
+                               capture_output=True, text=True, timeout=30)
+        if probe.returncode or Path(probe.stdout.strip()).resolve() != dest.resolve():
+            raise RuntimeError("existing checkout is not the target Git root; preserve it and inspect before retry")
+        problems = identity.check_upstream(str(dest), repo)
+        if problems:
+            raise RuntimeError("; ".join(problems) + "; existing checkout preserved")
     return dest
 
 
