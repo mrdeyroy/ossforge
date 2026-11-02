@@ -21,6 +21,10 @@ class Config:
     min_repo_score: int = 60
     min_stars: int = 500
     languages: list[str] = field(default_factory=lambda: ["python"])
+    preferred_repos: list[str] = field(default_factory=list)  # affinity, not permission or a quality guarantee
+    skills: list[str] = field(default_factory=list)  # deterministic ranking hints only
+    recent_issue_days: int = 7  # discover hides unchanged surfaced approvals temporarily; scout is unchanged
+    discovery_strategy: str = "broad"  # loop: broad preserves original behavior; rotate opts into affinity
     labels: list[str] = field(default_factory=lambda: ["help wanted", "good first issue"])
     max_open_prs_per_repo: int = 1
     cooldown_days: int = 14           # after a PR to a repo is closed unmerged

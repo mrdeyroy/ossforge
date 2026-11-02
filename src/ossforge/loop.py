@@ -11,7 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import digest, gh, hunt, patrol, safety, scout, submit
+from . import discovery, digest, gh, hunt, patrol, safety, scout, submit
 from .config import Config
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -53,7 +53,8 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
     for lang in cfg.languages:
         # one label per pass (rotating) keeps the request burst small; features alternate days
         label = cfg.labels[day % len(cfg.labels)]
-        for c in scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked):
+        for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" else
+                  discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
             if c.verdict.decision == "approve" and c.repo not in repos:
                 repos.append(c.repo)
         if day % 2:

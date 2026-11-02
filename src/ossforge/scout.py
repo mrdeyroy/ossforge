@@ -26,6 +26,7 @@ class Candidate:
     acceptance: str = "not checked"  # outside-merges-seen | none-observed | unknown | not checked
     score: float = 0.0
     why: list[str] = field(default_factory=list)
+    updated_at: str = ""
 
 
 def is_spam(title: str, body: str, keywords: list[str]) -> bool:
@@ -86,7 +87,7 @@ def explain_funnel(f: dict) -> str:
     if not f.get("fetched"):
         return "NO MATCHES: the search returned no issues for this query (try another label/language or lower min_stars)."
     if not f.get("kept"):
-        dropped = {k: f[k] for k in ("spam", "unclear", "skipped", "reviewed_unchanged", "below_min_stars", "repo_metadata_failed", "radar_failed") if f.get(k)}
+        dropped = {k: f[k] for k in ("spam", "unclear", "skipped", "reviewed_unchanged", "recently_surfaced", "below_min_stars", "repo_metadata_failed", "radar_failed") if f.get(k)}
         return f"ALL FILTERED: {f['fetched']} issues found, none usable; dropped by stage: {dropped or 'n/a'}."
     return f"{f['kept']} of {f['fetched']} issues kept ({f['approved']} approved)."
 
@@ -99,16 +100,17 @@ def scout(
     limit: int = 20,
     kind: str = "fix",
     skip_repos: set[str] | None = None,
+    *, query: str | None = None, recent: dict | None = None,
 ) -> list[Candidate]:
     f = LAST_FUNNEL
     f.clear()
-    f.update(fetched=0, spam=0, unclear=0, skipped=0, reviewed_unchanged=0, radar_failed=0, repo_metadata_failed=0, below_min_stars=0, kept=0, approved=0, stopped="")
+    f.update(fetched=0, spam=0, unclear=0, skipped=0, reviewed_unchanged=0, recently_surfaced=0, radar_failed=0, repo_metadata_failed=0, below_min_stars=0, kept=0, approved=0, stopped="")
     scores: dict[str, radar.RepoScore] = {}
     repo_stars: dict[str, int] = {}
     reviews = issue_reviews.load(cfg.path("issue_reviews.json"))
     out: list[Candidate] = []
     try:
-        items = gh.search_issues(build_query(language, label, cfg.min_stars), per_page=limit)
+        items = gh.search_issues(query or build_query(language, label, cfg.min_stars), per_page=limit)
     except gh.RateLimited as e:
         f["stopped"] = f"GitHub rate limit while searching ({e}); nothing was fetched"
         return out
@@ -125,6 +127,11 @@ def scout(
         if issue_reviews.unchanged_reason(reviews, repo, it["number"], it.get("updated_at")):
             f["reviewed_unchanged"] += 1
             continue
+        if recent is not None:
+            from .discovery import recent_reason
+            if recent_reason(recent, repo, it["number"], it.get("updated_at"), cfg.recent_issue_days):
+                f["recently_surfaced"] += 1
+                continue
         if skip_repos and repo in skip_repos:
             f["skipped"] += 1
             continue
@@ -162,11 +169,17 @@ def scout(
             f["stopped"] = f"GitHub rate limit while vetting {repo} ({e}); {len(items) - f['kept']} issues not examined"
             break
         sc, why = score_issue(it, rs.score + boost)
+        hay = f"{it['title']} {it.get('body') or ''}".lower()
+        hits = sorted({skill.lower().strip() for skill in cfg.skills if skill.strip() and
+                       re.search(r"(?<!\w)" + re.escape(skill.lower().strip()) + r"(?!\w)", hay)})
+        if hits:
+            sc = min(100.0, sc + min(10, 2 * len(hits)))
+            why.append("skill terms: " + ", ".join(hits) + " (text match, not complexity proof)")
         if acc:
             why = why + [f"outside PRs: {acc.status}, freshness {acc.freshness}, sampled {acc.sampled_prs} ({acc.reasons[0] if acc.reasons else ''})"]
 
         out.append(Candidate(repo, it["number"], it["title"], it["html_url"], rs.score + boost, v, kind, score=sc, why=why,
-                             acceptance=acc.status if acc else "not checked"))
+                             acceptance=acc.status if acc else "not checked", updated_at=it.get("updated_at") or ""))
         f["kept"] += 1
         f["approved"] += v.decision == "approve"
     out.sort(key=lambda c: (c.verdict.decision != "approve", -c.score))

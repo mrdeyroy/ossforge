@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
-from . import comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
+from . import discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -49,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
     v = add("vet", "vet one issue", "repo")
     v.add_argument("number", type=int)
     add("scout", "find vetted fix issues", language={}, label={"default": "help wanted"}, limit={"type": int, "default": 20})
+    add("discover", "rotate bounded broad/history/preferred issue discovery", language={},
+        label={"default": "help wanted"}, limit={"type": int, "default": 20},
+        strategy={"choices": ["rotate", "broad", "history", "preferred"], "default": "rotate"},
+        include_recent={"action": "store_true"})
     add("features", "find vetted feature issues", language={}, limit={"type": int, "default": 15})
     ir = add("review-issue", "skip an explicitly reviewed issue until upstream activity changes", "repo")
     ir.add_argument("number", type=int)
@@ -182,10 +186,10 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "vet":
         x = vet.vet_issue(a.repo, a.number)
         print(x.issue, x.decision, "; ".join(x.reasons))
-    elif a.cmd in ("scout", "features"):
+    elif a.cmd in ("scout", "features", "discover"):
         fn = (lambda: scout.scout(cfg, stats, a.language, a.label, a.limit)) if a.cmd == "scout" else \
              (lambda: scout.scout_features(cfg, stats, a.language, a.limit))
-        res_ = fn()
+        res_ = discovery.discover(cfg, stats, a.language, a.label, a.limit, a.strategy, a.include_recent) if a.cmd == "discover" else fn()
         print("scout:", scout.explain_funnel(scout.LAST_FUNNEL), file=sys.stderr)
         if a.json:
             emit({"funnel": scout.LAST_FUNNEL, "explanation": scout.explain_funnel(scout.LAST_FUNNEL), "candidates": res_})
