@@ -163,3 +163,17 @@ def test_native_verifier_restores_source_deletion_after_baseline(tmp_path, monke
     assert result.ok, result.log
     assert not (r / 'legacy.py').exists()
     assert not sh(r, 'git', 'status', '--porcelain')
+
+
+def test_native_verifier_restores_renamed_source(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    sh(r, 'git', 'mv', 'm.py', 'renamed.py')
+    (r / 'test_rename.py').write_text("from pathlib import Path\nassert Path('renamed.py').exists() and not Path('m.py').exists()\n")
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'rename source')
+    result = verify.verify_fix(r, base, Path(sys.executable), [], test_command=[sys.executable, 'test_rename.py'])
+    assert result.ok, result.log
+    assert not (r / 'm.py').exists() and (r / 'renamed.py').exists()
+    assert not sh(r, 'git', 'status', '--porcelain')
