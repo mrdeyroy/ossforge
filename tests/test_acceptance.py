@@ -50,3 +50,15 @@ def test_full_sample_covering_weeks_with_no_outside_merge_is_none():
 def test_full_sample_covering_days_only_is_unknown():
     prs = [_pr(i, "maint", "MEMBER", 1, 1) for i in range(40)]
     assert ac.summarize("o/r", prs, NOW).status == "unknown"
+
+
+def test_ghost_or_deleted_author_pr_does_not_crash():
+    closed = (NOW - timedelta(days=5)).isoformat()
+    prs = [
+        {"number": 1, "user": None, "author_association": "NONE",
+         "closed_at": closed, "merged_at": closed},
+    ]
+    a = ac.summarize("o/r", prs, NOW, merged_by=lambda p: "maint")
+    assert a.status == "outside-merges-seen"
+    assert a.external_merged[0]["author"] == "ghost"
+

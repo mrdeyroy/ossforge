@@ -36,12 +36,13 @@ def classify(pr: dict, checks: list[dict], reviews: list[dict], comments: list[d
         out.append(Action(repo, n, "changes_requested", "a reviewer requested changes"))
     if pr.get("mergeable_state") == "dirty":
         out.append(Action(repo, n, "conflict", "merge conflicts: rebase onto the base branch"))
-    others = [c for c in comments if c["user"]["login"] != me and c["user"].get("type") != "Bot"]
-    if others and (not comments or comments[-1]["user"]["login"] != me):
-        out.append(Action(repo, n, "feedback", f"unanswered comment from @{others[-1]['user']['login']}"))
+    others = [c for c in comments if (c.get("user") or {}).get("login") != me and (c.get("user") or {}).get("type") != "Bot"]
+    if others and (not comments or (comments[-1].get("user") or {}).get("login") != me):
+        last_author = (others[-1].get("user") or {}).get("login") or "ghost"
+        out.append(Action(repo, n, "feedback", f"unanswered comment from @{last_author}"))
     for c in comments:
         body = c.get("body", "").lower()
-        if "cla" in body and ("sign" in body or "not signed" in body) and c["user"].get("type") == "Bot":
+        if "cla" in body and ("sign" in body or "not signed" in body) and (c.get("user") or {}).get("type") == "Bot":
             out.append(Action(repo, n, "cla", f"CLA bot is waiting: {c['html_url']}"))
             break
     return out or [Action(repo, n, "idle", "no action needed")]
