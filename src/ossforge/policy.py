@@ -25,6 +25,8 @@ ANTI_AI_KEYWORDS: tuple[str, ...] = (
     "prohibit ai-generated", "prohibits ai-generated",
     "not be completed by automated agents", "must not be done by automated agents",
     "tasks are for humans only", "do not generate code",
+    "no unsupervised agentic tools", "no unsupervised agents",
+    "do not use unsupervised agentic tools",
     "explicitly rejected the generative use of agents",
     "you are explicitly forbidden from modifying",
 )
@@ -44,7 +46,8 @@ class PolicyResult:
 
 
 def scan_text(text: str, source: str | None = None) -> PolicyResult:
-    hay = (text or "").lower()
+    # Markdown emphasis must not hide literal prohibitions such as **no**.
+    hay = re.sub(r"[*_`]", "", (text or "").lower())
     hits = [k for k in ANTI_AI_KEYWORDS if k in hay]
     return PolicyResult(bool(hits), hits, source if hits else None)
 
