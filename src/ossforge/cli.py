@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import acceptance, identity, policy_review
+from . import acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
 from . import comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -50,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("number", type=int)
     add("scout", "find vetted fix issues", language={}, label={"default": "help wanted"}, limit={"type": int, "default": 20})
     add("features", "find vetted feature issues", language={}, limit={"type": int, "default": 15})
+    ir = add("review-issue", "skip an explicitly reviewed issue until upstream activity changes", "repo")
+    ir.add_argument("number", type=int)
+    ir.add_argument("--reason", required=True)
+    rr = add("reconsider-issue", "clear a local issue-review decision", "repo")
+    rr.add_argument("number", type=int)
     c = add("critique", "score an open PR and draft (not post) a review", "repo")
     c.add_argument("number", type=int)
     pc = add("post-critique", "post an approved critique comment (dry run unless --yes)", "repo")
@@ -202,6 +207,21 @@ def main(argv: list[str] | None = None) -> int:
         except comment.Refused as e:
             print("REFUSED:", e)
             return 1
+    elif a.cmd == "review-issue":
+        issue = gh.api(f"repos/{a.repo}/issues/{a.number}", fresh=True)
+        if "pull_request" in issue:
+            print("expected an issue, not a pull request", file=sys.stderr)
+            return 2
+        try:
+            issue_reviews.record(cfg.path("issue_reviews.json"), a.repo, a.number,
+                                 issue.get("updated_at", ""), a.reason)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        print(f"reviewed {a.repo}#{a.number}: skipped only while updated_at stays {issue['updated_at']}")
+    elif a.cmd == "reconsider-issue":
+        issue_reviews.reconsider(cfg.path("issue_reviews.json"), a.repo, a.number)
+        print(f"reconsidering {a.repo}#{a.number}")
     elif a.cmd == "audit":
         dest = hunt.clone(cfg, a.repo)
         pol = hunt.policy_of(dest)

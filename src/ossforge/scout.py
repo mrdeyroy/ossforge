@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import acceptance, gh, radar, vet
+from . import acceptance, gh, issue_reviews, radar, vet
 from .config import Config
 from .outcomes import Stats
 
@@ -86,7 +86,7 @@ def explain_funnel(f: dict) -> str:
     if not f.get("fetched"):
         return "NO MATCHES: the search returned no issues for this query (try another label/language or lower min_stars)."
     if not f.get("kept"):
-        dropped = {k: f[k] for k in ("spam", "unclear", "skipped", "below_min_stars", "repo_metadata_failed", "radar_failed") if f.get(k)}
+        dropped = {k: f[k] for k in ("spam", "unclear", "skipped", "reviewed_unchanged", "below_min_stars", "repo_metadata_failed", "radar_failed") if f.get(k)}
         return f"ALL FILTERED: {f['fetched']} issues found, none usable; dropped by stage: {dropped or 'n/a'}."
     return f"{f['kept']} of {f['fetched']} issues kept ({f['approved']} approved)."
 
@@ -102,9 +102,10 @@ def scout(
 ) -> list[Candidate]:
     f = LAST_FUNNEL
     f.clear()
-    f.update(fetched=0, spam=0, unclear=0, skipped=0, radar_failed=0, repo_metadata_failed=0, below_min_stars=0, kept=0, approved=0, stopped="")
+    f.update(fetched=0, spam=0, unclear=0, skipped=0, reviewed_unchanged=0, radar_failed=0, repo_metadata_failed=0, below_min_stars=0, kept=0, approved=0, stopped="")
     scores: dict[str, radar.RepoScore] = {}
     repo_stars: dict[str, int] = {}
+    reviews = issue_reviews.load(cfg.path("issue_reviews.json"))
     out: list[Candidate] = []
     try:
         items = gh.search_issues(build_query(language, label, cfg.min_stars), per_page=limit)
@@ -121,6 +122,9 @@ def scout(
             f["unclear"] += 1
             continue
         repo = it["repository_url"].split("repos/")[1]
+        if issue_reviews.unchanged_reason(reviews, repo, it["number"], it.get("updated_at")):
+            f["reviewed_unchanged"] += 1
+            continue
         if skip_repos and repo in skip_repos:
             f["skipped"] += 1
             continue
