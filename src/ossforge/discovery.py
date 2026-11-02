@@ -9,7 +9,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from . import issue_reviews, scout
+from . import gh, issue_reviews, scout
 from .config import Config
 from .outcomes import Stats
 
@@ -23,8 +23,29 @@ class Plan:
     query: str
 
 
+def discover_broad_repos(cfg: Config, language: str | None = None, cursor: int = 0) -> list[str]:
+    """Phase 1: discover qualifying repositories meeting min_stars via repository search."""
+    if cfg.min_stars <= 0:
+        return []
+    query = f"stars:>={cfg.min_stars} fork:false archived:false"
+    if language:
+        query += f" language:{language}"
+    try:
+        repos = gh.search_repositories(query, per_page=30, sort="stars")
+    except gh.RateLimited:
+        raise
+    except (gh.GhError, OSError):
+        return []
+    names = [r["full_name"] for r in repos if isinstance(r, dict) and _REPO.fullmatch(r.get("full_name", ""))]
+    if not names:
+        return []
+    window_size = 5
+    start = (cursor * window_size) % len(names)
+    return [names[(start + i) % len(names)] for i in range(min(window_size, len(names)))]
+
+
 def plan(cfg: Config, stats: Stats, language: str | None, label: str,
-         strategy: str, cursor: int) -> Plan:
+         strategy: str, cursor: int, broad_repos: list[str] | None = None) -> Plan:
     if strategy not in {"rotate", "broad", "history", "preferred"}:
         raise ValueError("strategy must be rotate, broad, history or preferred")
     preferred = sorted({r.lower() for r in cfg.preferred_repos if _REPO.fullmatch(r)})
@@ -35,9 +56,12 @@ def plan(cfg: Config, stats: Stats, language: str | None, label: str,
     repos = pools.get(chosen, [])
     # Five repositories bound query length and request cost. Rotating windows eventually cover the list.
     window = cursor // len(enabled) if strategy == "rotate" else cursor
-    repos = [repos[(window * 5 + i) % len(repos)] for i in range(min(5, len(repos)))] if repos else []
+    if chosen == "broad" and broad_repos:
+        repos = [broad_repos[(window * 5 + i) % len(broad_repos)] for i in range(min(5, len(broad_repos)))]
+    elif repos:
+        repos = [repos[(window * 5 + i) % len(repos)] for i in range(min(5, len(repos)))]
     query = scout.build_query(language, label, cfg.min_stars)
-    if chosen != "broad":
+    if repos:
         query += " " + " ".join(f"repo:{r}" for r in repos)
     return Plan(chosen, repos, query)
 
@@ -63,6 +87,16 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
     selected = plan(cfg, stats, language, label, strategy, cursor)
     recent = state.get("recent", {})
     recent = recent if isinstance(recent, dict) else {}
+    try:
+        if selected.strategy == "broad" and not selected.repos:
+            broad_repos = discover_broad_repos(cfg, language, cursor)
+            if broad_repos:
+                selected.repos = broad_repos
+                selected.query = scout.build_query(language, label, cfg.min_stars) + " " + " ".join(f"repo:{r}" for r in broad_repos)
+    except (gh.RateLimited, gh.ReadBudgetExceeded) as e:
+        scout.LAST_FUNNEL.clear()
+        scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0, stopped=f"GitHub read deadline or rate limit while searching ({e}); nothing was fetched")
+        return []
     if selected.strategy != "broad" and not selected.repos:
         scout.LAST_FUNNEL.clear()
         scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0, stopped="")
