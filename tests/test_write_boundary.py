@@ -482,3 +482,27 @@ def test_duplicate_check_covers_each_changed_source_not_just_original_candidate(
     world['mp'].setattr(dedupe, 'recent_commit_hits', lambda repo, path, *a, **k: (commits.append(path) or []))
     run(world)
     assert set(searches) == set(commits) == {'a.py', 'other.py'}
+
+
+def test_upstream_advance_requires_refresh_and_reverification_before_writes(world):
+    seed = world['tmp'] / 'seed'
+    (seed / 'a.py').write_text('x = 99\n')
+    sh('git', 'add', 'a.py', cwd=seed)
+    sh('git', 'commit', '-qm', 'upstream fix', cwd=seed)
+    sh('git', 'push', '-q', 'origin', 'HEAD:main', cwd=seed)
+    with pytest.raises(submit.Refused, match='upstream'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+    assert (world['clone'] / 'a.py').read_text() == 'x = 2\n'
+
+
+def test_fetch_without_rebase_still_requires_updated_base(world):
+    seed = world['tmp'] / 'seed'
+    (seed / 'new_upstream.py').write_text('new = True\n')
+    sh('git', 'add', '.', cwd=seed)
+    sh('git', 'commit', '-qm', 'upstream new file', cwd=seed)
+    sh('git', 'push', '-q', 'origin', 'HEAD:main', cwd=seed)
+    sh('git', 'fetch', 'origin', cwd=world['clone'])
+    with pytest.raises(submit.Refused, match='upstream'):
+        run(world, execute=True)
+    assert writes(world['log']) == []

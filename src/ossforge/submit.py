@@ -47,6 +47,27 @@ def _identity_gate(cfg: Config, cwd: str, base: str, repo: str, fork: bool) -> N
         raise Refused(str(e)) from e
 
 
+def _upstream_gate(it: Item) -> None:
+    if it.submitted.get("pr_url"):
+        return
+    # Inspect the live default tip without fetching/resetting an active patch checkout.
+    # A changed branch needs the operator to refresh/rebase/test, not an automatic rewrite.
+    problems = identity.check_upstream(it.clone, it.repo)
+    if problems:
+        raise Refused("; ".join(problems))
+    try:
+        probe = subprocess.run(["git", "ls-remote", "origin", "HEAD"], cwd=it.clone,
+                               capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Refused("upstream default tip unavailable; not publishing") from exc
+    if probe.returncode:
+        raise Refused("upstream default tip unavailable; not publishing")
+    output = probe.stdout.split()
+    local = _run(["git", "rev-parse", "origin/HEAD"], it.clone)
+    if len(output) != 2 or output[1] != "HEAD" or output[0] != local or _base(it.clone) != local:
+        raise Refused("upstream default branch changed or could not be verified; fetch, review/rebase and re-run verification before publishing")
+
+
 def _evidence_gate(it: Item) -> None:
     try:
         evidence.check(Path(it.clone), _base(it.clone), it.branch, it.verification)
@@ -170,6 +191,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     why = safety.repo_allowed(cfg, it.repo, history)
     if why and not it.submitted.get("issue_url"):
         raise Refused(why)
+    _upstream_gate(it)
     _source_work_gate(it)
     files = _policy_files(it.repo)
     pol = policy.scan_files(files)
@@ -263,6 +285,7 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
     _identity_gate(cfg, cwd, _base(cwd), it.repo, fork=False)  # re-check at the write boundary
     _evidence_gate(it)  # exact tested content again immediately before the first external write
     _admission_gate(it, cfg)  # current upstream consent, never cached
+    _upstream_gate(it)
     _source_work_gate(it)
     _duplicate_gate(it)
     me = gh.api("user", fresh=True)["login"]
@@ -303,6 +326,7 @@ def _submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, e
     if not prog.get("pr_url"):
         if limiter.remaining() <= 0:
             raise Refused("daily PR cap reached; existing issue/fork progress retained for a later day")
+        _upstream_gate(it)
         _source_work_gate(it)
         _duplicate_gate(it)
         body = f"{it.pr_body}\n\nCloses #{num}{note}"
