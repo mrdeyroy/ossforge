@@ -109,7 +109,6 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
     # silently leave the fix in place. Revert existing files from base; move new files aside and put them back.
     in_base = [f for f in r.fix_files if _run(["git", "cat-file", "-e", f"{base}:{f}"], clone)[0] == 0]
     added = [f for f in r.fix_files if f not in in_base]
-    saved = {f: (clone / f).read_bytes() for f in added if (clone / f).is_file()}
     reverted = True
     if test_command is None and failure_code != 1:
         r.log.append("pytest baseline must fail with exit 1, not a collection/tool error")
@@ -120,23 +119,20 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
             if rc0:
                 reverted = False
                 r.log.append(f"could not revert fix files to base, no 'without fix' evidence: {out0[-200:]}")
-        for f in saved:
-            (clone / f).unlink()
+        for f in added:
+            if (clone / f).is_file() or (clone / f).is_symlink():
+                (clone / f).unlink()
         if reverted:
             rc, out = _run(pytest, clone, timeout)
             r.failed_without_fix = rc == failure_code
             r.log.append(f"without fix rc={rc}: {out[-300:]}")
     finally:
-        if in_base:
-            # Restore the committed patch including deleted source paths. checkout HEAD
-            # cannot restore an absent path, leaving the baseline file behind.
-            rc_restore, out_restore = _run(["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", *in_base], clone)
-            if rc_restore:
-                r.failed_without_fix = False
-                r.log.append(f"could not restore committed fix; inspect worktree before retry: {out_restore[-200:]}")
-        for f, data in saved.items():
-            (clone / f).parent.mkdir(parents=True, exist_ok=True)
-            (clone / f).write_bytes(data)
+        # Git restores tracked content and metadata, including executable bits,
+        # symlinks, additions and deletions. Byte copies lose that metadata.
+        rc_restore, out_restore = _run(["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", *r.fix_files], clone)
+        if rc_restore:
+            r.failed_without_fix = False
+            r.log.append(f"could not restore committed fix; inspect worktree before retry: {out_restore[-200:]}")
 
     rc, out = _run(pytest, clone, timeout)
     r.passed_with_fix = rc == 0

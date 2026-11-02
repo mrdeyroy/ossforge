@@ -201,3 +201,34 @@ def test_timed_out_verification_kills_descendant_processes(tmp_path):
     assert rc == 124
     time.sleep(1.7)
     assert not marker.exists(), 'timed-out test left a descendant running after baseline restoration'
+
+
+def test_added_executable_source_keeps_mode_after_verification(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'helper.py').write_text('value = 2\n')
+    (r / 'helper.py').chmod(0o755)
+    (r / 'm.py').write_text('from helper import value\n')
+    (r / 'test_exec.py').write_text('from m import value\nassert value == 2\n')
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'executable helper')
+    result = verify.verify_fix(r, base, Path(sys.executable), [], test_command=[sys.executable, 'test_exec.py'])
+    # The baseline import failure is not a qualified upstream regression. This
+    # control specifically verifies restoration independently of test acceptance.
+    assert (r / 'helper.py').stat().st_mode & 0o111
+    assert not sh(r, 'git', 'status', '--porcelain'), result.log
+
+
+def test_added_source_symlink_is_not_replaced_with_regular_file(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'alias.py').symlink_to('m.py')
+    (r / 'm.py').write_text('def f():\n    return 2\n')
+    (r / 'test_alias.py').write_text('from alias import f\nassert f() == 2\n')
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'source alias')
+    result = verify.verify_fix(r, base, Path(sys.executable), [], test_command=[sys.executable, 'test_alias.py'])
+    assert (r / 'alias.py').is_symlink(), result.log
+    assert not sh(r, 'git', 'status', '--porcelain')
