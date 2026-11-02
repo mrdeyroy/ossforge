@@ -117,7 +117,12 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
             r.log.append(f"without fix rc={rc}: {out[-300:]}")
     finally:
         if in_base:
-            _run(["git", "checkout", "HEAD", "--", *in_base], clone)
+            # Restore the committed patch including deleted source paths. checkout HEAD
+            # cannot restore an absent path, leaving the baseline file behind.
+            rc_restore, out_restore = _run(["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", *in_base], clone)
+            if rc_restore:
+                r.failed_without_fix = False
+                r.log.append(f"could not restore committed fix; inspect worktree before retry: {out_restore[-200:]}")
         for f, data in saved.items():
             (clone / f).parent.mkdir(parents=True, exist_ok=True)
             (clone / f).write_bytes(data)
@@ -127,7 +132,7 @@ def verify_fix(clone: Path, base: str, py: Path, test_args: list[str], timeout: 
     r.log.append(f"with fix rc={rc}: {out[-300:]}")
 
     checks = list(check_commands or [])
-    pyfiles = [f for f in files if f.endswith(".py")]
+    pyfiles = [f for f in files if f.endswith(".py") and (clone / f).is_file()]
     if test_command is None and pyfiles:
         checks.append([str(py), "-m", "ruff", "check", *pyfiles])
     for command in checks:

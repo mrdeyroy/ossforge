@@ -146,3 +146,46 @@ def test_cli_native_mode_does_not_pip_install(tmp_path, monkeypatch, capsys):
     assert seen[0]['check_commands'] == [['node', '--check', 'a.js']]
     assert queue.Queue(q.path).items['x'].verification == {'schema': 1}
     assert 'verified: x' in capsys.readouterr().out
+
+
+def test_native_verifier_restores_source_deletion_after_baseline(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    (r / 'legacy.py').write_text('obsolete = True\n')
+    sh(r, 'git', 'add', '.')
+    sh(r, 'git', 'commit', '-qm', 'legacy baseline')
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'legacy.py').unlink()
+    (r / 'test_absence.py').write_text("from pathlib import Path\nassert not Path('legacy.py').exists()\n")
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'remove obsolete source')
+    result = verify.verify_fix(r, base, Path(sys.executable), [], test_command=[sys.executable, 'test_absence.py'])
+    assert result.ok, result.log
+    assert not (r / 'legacy.py').exists()
+    assert not sh(r, 'git', 'status', '--porcelain')
+
+
+def test_native_verifier_restores_renamed_source(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    sh(r, 'git', 'mv', 'm.py', 'renamed.py')
+    (r / 'test_rename.py').write_text("from pathlib import Path\nassert Path('renamed.py').exists() and not Path('m.py').exists()\n")
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'rename source')
+    result = verify.verify_fix(r, base, Path(sys.executable), [], test_command=[sys.executable, 'test_rename.py'])
+    assert result.ok, result.log
+    assert not (r / 'm.py').exists() and (r / 'renamed.py').exists()
+    assert not sh(r, 'git', 'status', '--porcelain')
+
+
+def test_default_python_verification_does_not_lint_deleted_source(tmp_path, monkeypatch):
+    import sys
+    r = _repo(tmp_path, monkeypatch)
+    base = sh(r, 'git', 'rev-parse', 'HEAD')
+    (r / 'm.py').unlink()
+    (r / 'test_absence.py').write_text("from pathlib import Path\n\n\ndef test_removed():\n    assert not Path('m.py').exists()\n")
+    sh(r, 'git', 'add', '-A')
+    sh(r, 'git', 'commit', '-qm', 'remove source')
+    result = verify.verify_fix(r, base, Path(sys.executable), ['test_absence.py'])
+    assert result.ok, result.log
