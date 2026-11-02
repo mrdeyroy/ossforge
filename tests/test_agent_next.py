@@ -88,12 +88,12 @@ def test_real_cli_checkpoint_config_stop_and_no_network(tmp_path):
     env = dict(os.environ)
     # No gh executable is available. A checkpoint must not need a remote API.
     env['PATH'] = str(tmp_path)
-    p = subprocess.run([sys.executable, '-m', 'ossforge', '--config', str(cfg), 'agent-next'],
+    p = subprocess.run([str(Path(sys.executable).with_name('ossforge')), '--config', str(cfg), 'agent-next'],
                        capture_output=True, text=True, env=env)
     assert p.returncode == 0, p.stderr
     assert json.loads(p.stdout)['status'] == 'stopped'
     stop.unlink()
-    p = subprocess.run([sys.executable, '-m', 'ossforge', '--config', str(cfg), 'agent-next'],
+    p = subprocess.run([str(Path(sys.executable).with_name('ossforge')), '--config', str(cfg), 'agent-next'],
                        capture_output=True, text=True, env=env)
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
