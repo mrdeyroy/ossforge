@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from . import contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet
+from . import evidence, contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet
 from .config import Config
 from .limiter import DailyLimiter
 from .queue import Item
@@ -43,6 +43,13 @@ def _identity_gate(cfg: Config, cwd: str, base: str, repo: str, fork: bool) -> N
     try:
         identity.require(problems)
     except identity.IdentityError as e:
+        raise Refused(str(e)) from e
+
+
+def _evidence_gate(it: Item) -> None:
+    try:
+        evidence.check(Path(it.clone), _base(it.clone), it.branch, it.verification)
+    except evidence.StaleEvidence as e:
         raise Refused(str(e)) from e
 
 
@@ -108,6 +115,7 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     cwd = str(Path(it.clone))
     base = _base(cwd)
     _identity_gate(cfg, cwd, base, it.repo, fork=False)
+    _evidence_gate(it)
     changed = _run(["git", "diff", "--name-only", f"{base}..HEAD"], cwd).splitlines()
     diff = _run(["git", "diff", f"{base}..HEAD"], cwd)
     bad = safety.check_diff(changed, diff)
@@ -150,6 +158,7 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
     note = DISCLOSURE if add_note else ""
     cwd = str(Path(it.clone))
     _identity_gate(cfg, cwd, _base(cwd), it.repo, fork=False)  # re-check at the write boundary
+    _evidence_gate(it)  # exact tested content again immediately before the first external write
     me = gh.api("user", fresh=True)["login"]
 
     def progress(**kw) -> None:
@@ -172,6 +181,7 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
         if cfg.signoff_for(it.repo):
             _ensure_signoff(cwd)
         _identity_gate(cfg, cwd, _base(cwd), it.repo, fork=True)  # the destination is the operator's own fork
+        _evidence_gate(it)  # signoff may rewrite commits, but must not change the tested tree
         _run(["git", "push", "-u", "fork", it.branch], cwd)
         progress(fork_pushed=True)
 

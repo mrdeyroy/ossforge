@@ -266,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         q.set(a.id, status="verified", branch=a.branch, issue_title=a.issue_title, pr_title=a.pr_title,
               issue_body=Path(a.issue_body_file).read_text(encoding="utf-8"),
-              pr_body=Path(a.pr_body_file).read_text(encoding="utf-8"))
+              pr_body=Path(a.pr_body_file).read_text(encoding="utf-8"), verification=r.evidence)
         q.save()
         print("verified:", a.id)
     elif a.cmd == "reject":
