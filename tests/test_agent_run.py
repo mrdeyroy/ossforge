@@ -118,3 +118,16 @@ def test_verified_resume_rechecks_receipt_before_reporting_retained_patch(tmp_pa
     with pytest.raises(evidence.StaleEvidence, match='dirty'):
         agent_run.run(cfg, ['must-not-start'], discover=False)
     assert (Path(q.items['a'].clone) / 'calc.py').read_text() == 'uncommitted later change\n'
+
+
+def test_verified_resume_rejects_committed_tree_change(tmp_path):
+    from ossforge import evidence
+    cfg, command = fixture(tmp_path)
+    assert agent_run.run(cfg, command, discover=False)['status'] == 'verified_not_submitted'
+    q = Queue(cfg.path('queue.json'))
+    clone = Path(q.items['a'].clone)
+    (clone / 'calc.py').write_text('def f(n): return 0\n')
+    for cmd in (['git', 'add', 'calc.py'], ['git', 'commit', '-qm', 'later unchecked change']):
+        subprocess.run(cmd, cwd=clone, check=True, capture_output=True)
+    with pytest.raises(evidence.StaleEvidence, match='no longer matches'):
+        agent_run.run(cfg, ['must-not-start'], discover=False)
