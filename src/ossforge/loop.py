@@ -7,6 +7,7 @@ and nothing is submitted unless an item is already `verified` AND auto_submit is
 from __future__ import annotations
 
 import os
+import math
 import subprocess
 import time
 from pathlib import Path
@@ -93,6 +94,8 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
 
 
 def run_forever(cfg: Config, interval_s: int) -> None:
+    if not math.isfinite(interval_s) or interval_s < 1:
+        raise ValueError("loop interval must be finite and at least one second")
     while True:
         for n in run_once(cfg):
             print(n, flush=True)

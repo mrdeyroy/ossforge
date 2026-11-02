@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 from pathlib import Path
 
 from . import audit as audit_mod
@@ -17,8 +18,14 @@ TOP_PER_REPO = 8
 def clone(cfg: Config, repo: str) -> Path:
     dest = Path(cfg.work_dir) / repo.replace("/", "__")
     if not dest.exists():
-        subprocess.run(["git", "clone", "--depth", "50", f"https://github.com/{repo}", str(dest)],
-                       check=True, capture_output=True)
+        try:
+            subprocess.run(["git", "clone", "--depth", "50", f"https://github.com/{repo}", str(dest)],
+                           check=True, capture_output=True, timeout=300)
+        except subprocess.TimeoutExpired as exc:
+            # Only this attempt created the destination. Never reuse its partial checkout.
+            if dest.exists():
+                shutil.rmtree(dest)
+            raise RuntimeError("clone timed out after 300 seconds; partial checkout removed, retry later") from exc
         identity.apply_local(cfg, str(dest))  # fresh clones commit as the owner from the start (local config only)
     return dest
 
