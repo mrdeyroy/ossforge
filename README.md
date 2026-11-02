@@ -236,3 +236,21 @@ Issues and PRs are welcome. Run `pytest -q` and `ruff check src tests` before op
 ## License
 
 MIT. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for credits.
+
+### Avoid reviewing the same unchanged issue again
+
+After reading an issue, record an explicit local decision with a reason:
+
+```sh
+ossforge review-issue owner/repo 123 --reason "Broad product request; no source-level reproducer found"
+ossforge reconsider-issue owner/repo 123
+```
+
+`scout`, `features` and the research loop skip that issue only while GitHub's
+`updated_at` matches the reviewed snapshot. New activity returns it for review;
+a missing timestamp is never suppressed. `reconsider-issue` clears the decision.
+This is not a permanent bug verdict, repository ban or evidence of rejection by
+maintainers. Decisions live in the configured `state_dir/issue_reviews.json`:
+configs sharing that directory share decisions; separate state directories do not.
+The `reviewed_unchanged` funnel count distinguishes these skips from no matches.
+The existing `reject ID` command still applies to queued static findings only.
