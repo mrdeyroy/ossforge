@@ -34,7 +34,10 @@ def ruff_findings(root: Path, python: str = "") -> list[Finding]:
         return []
     out = []
     for d in data:
-        rel = str(Path(d["filename"]).resolve().relative_to(root.resolve())).replace("\\", "/")
+        try:
+            rel = str(Path(d["filename"]).resolve().relative_to(root.resolve())).replace("\\", "/")
+        except (ValueError, KeyError):
+            continue
         if set(Path(rel).parts) & (SKIP_DIRS | {"tests", "test", "docs", "examples"}):
             continue
         out.append(Finding(rel, d["location"]["row"], f"ruff-{d['code']}", d["message"], "bug"))
@@ -45,9 +48,15 @@ def js_findings(root: Path, max_files: int = 2000) -> list[Finding]:
     out: list[Finding] = []
     n = 0
     for p in root.rglob("*"):
-        if p.suffix not in JS_EXT or set(p.relative_to(root).parts) & SKIP_DIRS:
+        if p.suffix not in JS_EXT:
             continue
-        if ".test." in p.name or ".spec." in p.name or "__tests__" in p.parts:
+        try:
+            rel = str(p.relative_to(root)).replace("\\", "/")
+        except ValueError:
+            continue
+        if set(Path(rel).parts) & SKIP_DIRS:
+            continue
+        if ".test." in p.name or ".spec." in p.name or "__tests__" in Path(rel).parts:
             continue
         n += 1
         if n > max_files:

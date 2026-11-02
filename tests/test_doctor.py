@@ -31,3 +31,19 @@ def test_doctor_does_not_pass_unrelated_path_ruff(monkeypatch):
     monkeypatch.setattr(doctor.identity, 'check_login', lambda *a: [])
     result = doctor.check(Config())
     assert not next(row[1] for row in result if row[0].startswith('ruff'))
+
+
+def test_ruff_findings_discards_external_paths_safely(monkeypatch, tmp_path):
+    import json
+    import subprocess
+    fake_payload = json.dumps([
+        {"filename": "/external/path/other.py", "location": {"row": 1}, "code": "F821", "message": "msg"},
+        {"filename": str(tmp_path / "valid.py"), "location": {"row": 5}, "code": "B006", "message": "mutable def"},
+    ])
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout=fake_payload, stderr="")
+    monkeypatch.setattr(external.subprocess, "run", fake_run)
+    found = external.ruff_findings(tmp_path)
+    assert len(found) == 1
+    assert found[0].path == "valid.py"
+    assert found[0].kind == "ruff-B006"
