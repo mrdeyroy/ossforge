@@ -267,3 +267,11 @@ a verified bug, rejection or submission, and runs no native checks or publicatio
 The CLI returns nonzero for held work so automation cannot count it as successful
 verification. The consumed driver attempt stays counted; later runs do not relaunch
 that held task. Use explicit `unhold` only after its prerequisite is resolved.
+
+PR text search is only a candidate-reference search. Dependency changelogs can
+contain another repository's identically numbered issue. Vetting and publication
+ignore a hit only when every matching number in its available title/body is
+explicitly qualified to another repository. Same-repository, unqualified,
+missing-text and ambiguous hits still require review. Actual timeline links and
+incomplete-coverage refusals remain unchanged. This does not establish that a
+closed PR fixed the issue or permit publishing a competing fix without review.
