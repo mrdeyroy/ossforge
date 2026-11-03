@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from . import qualification, driver, evidence, submit
+from . import repo_research, qualification, driver, evidence, submit
 from .config import Config
 from .queue import Queue
 
@@ -63,6 +63,11 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
     if remaining > 0:
         return result("wait_for_cooldown", retry_after_seconds=math.ceil(remaining),
                       retry_at_epoch=until, reason="recorded GitHub cooldown; do not search or change accounts to bypass it")
+    if cfg.repo_first:
+        try:
+            return repo_research.checkpoint(cfg, prefix)
+        except repo_research.Invalid as exc:
+            return result("inspect_local", reason=str(exc), warning="preserve repository research state; do not reset it")
     pending = [i for i in queue.by_status("found") if i.kind == "issue" and i.source_issue and not i.clone]
     if pending:
         return result("recover_issue_handoff",

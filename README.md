@@ -563,3 +563,13 @@ conflicting sections and any human-assistance allowance, with `ossforge policy-r
 The hold does not accept a prose override or an authorship attestation; publication still
 requires the existing source-pinned policy review and all other gates. Choose other work
 while a restriction remains unresolved. Literal matching is conservative and incomplete.
+
+Repo-first research is available as a staged opt-in with `repo_first: true`.
+`agent-next` then selects a repository-research checkpoint independently of open
+issue search, using `research-repo`, policy-reviewed `research-repo --begin`, and
+`research-propose PATH LINE --detail ...`. The IDE AI investigates code and owns
+semantic diagnosis; finite static `hunt` hints are optional, not bug proof.
+See [the repo-first flow](docs/local-ai.md#repo-first-investigation-staged-opt-in)
+for evidence limits and prerequisites. Existing local work, STOP, reconciliation
+and cooldown still take priority. The issue-only compatibility route and saved
+partial issue batches remain unchanged.

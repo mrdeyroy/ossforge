@@ -26,7 +26,21 @@ Do not start a nested model process just because you are already an AI assistant
 > unclear or conflicting sources. No specific rule means the normal default,
 > not hold. A rule change requires rereading, not changing the owner's authority.
 >
+> For repository-first code investigation, use `repo_first: true` in the chosen
+> config. This staged route does not yet implement automatic eligible-existing-
+> issue adoption or a session search-budget controller; do not claim the whole
+> workflow is proven from repository selection alone.
 > Run `ossforge --config ossforge.yaml agent-next` after startup and each step.
+> - repo_research: follow the repo-first investigation section below. Read the
+>   collected suitability/policy evidence and linked rules. Record the ordinary
+>   source-backed review, then use the supplied --begin command only when the
+>   rules allow this work. Otherwise defer with a specific reason and continue
+>   to another selected repo within the session's approved search budget.
+> - repo_investigation: inspect the clean selected source semantically. The IDE
+>   AI diagnoses bugs, chooses fixes and writes issue/PR explanations. Static
+>   hunt hints are optional. Use research-propose for a source-reviewed new
+>   hypothesis, then return to agent-next and the normal native-check route.
+>   Do not edit state files or treat an issue's age as permission.
 > Follow its structured checkpoint:
 > - stopped: preserve state and wait for the owner, never clear STOP yourself.
 > - reconcile_remote: inspect current issue, owner fork branch and exact-head PR
@@ -338,3 +352,51 @@ unchanged observations retain the deferral, changed issue/reference fields reope
 review. Clean or verified work and known cooldown/partial-run recovery take
 priority over deferred qualification. Do not count a review handoff as useful
 contribution success.
+
+### Repo-first investigation (staged opt-in)
+
+Set `repo_first: true` in the chosen config to use repository research when there
+is no existing actionable queue item. This does not change identity or authority.
+The issue-only compatibility route remains available with `repo_first: false`.
+Saved issue batches and issue cursors are not modified by repository research.
+
+Follow `agent-next` as usual:
+
+- `repo_research`: run `research-repo` to select one repository and collect its
+  health, outside-contributor merge sample, current default-branch revision and
+  policy documents. Read the evidence and its limitations. Popularity, a health
+  score or a prior outside merge is not permission or proof that useful work
+  exists. Evaluate native-test feasibility and linked external contribution
+  pages too. Record the normal source-backed policy review. Defer unsuitable
+  work with `research-repo --defer "specific reason"`. This advances only the
+  independent repository research cursor. An incomplete read retains the selected
+  repository; use `--refresh` instead of silently replacing it.
+- After source review, `research-repo --begin` rechecks current policy, repository
+  restrictions and health. It requires a current normal `issue_pr` or `pr_only`
+  policy-review route, then creates or inspects a clean checkout at the selected
+  exact revision. A stale or incomplete checkout is preserved and refused.
+- `repo_investigation`: begin runs the built-in deterministic Python candidate
+  scan and returns at most eight compact source hints. Review those first and
+  use targeted AI reasoning for unresolved behavior, causes and possible fixes.
+  No model is invoked for repository search, metadata or the static scan, and
+  empty detector output is not proof that no bug exists. `hunt OWNER/REPO` can supply finite static
+  hints, but no detector hit is required for semantic investigation. A detector
+  finding is never a confirmed bug. For a specific source-reviewed hypothesis,
+  use `research-propose PATH LINE --detail "behavior, cause and impact"`.
+  It binds the proposal to the clean selected checkout, rechecks policy/access
+  and current upstream revision, and checks all-state issue/PR and recent commit
+  evidence before creating an unverified candidate for the normal `agent-task`
+  and `agent-verify` route. Search failures or possible existing work refuse the
+  proposal; a missing keyword hit is not complete semantic duplicate clearance.
+- A 2-3-day-old issue with no PR may be worth investigating. It does not grant
+  permission, expire a claim or assignment, or prove the bug. Existing issue
+  adoption is still through fresh issue vetting, not `research-propose`; this
+  first stage does not implement closed-reference adjudication or an age-only
+  override. No static result, research record or IDE proposal bypasses native
+  fail-before/pass-after verification or current publication gates.
+
+The IDE AI handles semantic diagnosis and brainstorming where deterministic
+checks cannot settle the question, plus the fix and necessary prose. Ossforge supplies sources, durable
+steps and evidence checks without requiring a second model subscription. This
+stage connects repository selection to a public semantic-investigation/proposal
+path; it is not proof that a fresh IDE has completed a useful contribution.
