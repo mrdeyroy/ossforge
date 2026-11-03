@@ -57,6 +57,11 @@ Do not start a nested model process just because you are already an AI assistant
 >   issue/PR links as submission progress, not live status or acceptance. Do not
 >   propose or publish the same work again; reconcile current remote state when
 >   requested or relevant feedback arrives. This does not start PR polling.
+>   Completion requires the saved item's exact originating investigation ID,
+>   investigating status and nonempty matching repo/clone. Old unbound records
+>   are not retroactively treated as completed. STOP, partial reconciliation and
+>   actionable queued work take priority. Other held/qualification work remains
+>   saved but does not restart an already submitted contribution session.
 > - stopped: preserve state and wait for the owner, never clear STOP yourself.
 > - reconcile_remote: inspect current issue, owner fork branch and exact-head PR
 >   state before retrying. A saved URL is not current remote truth. If a prior

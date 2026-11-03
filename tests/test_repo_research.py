@@ -108,6 +108,7 @@ def test_begin_and_propose_public_path_is_hypothesis_not_verified(monkeypatch, t
     item = Queue(cfg.path('queue.json')).items[result['id']]
     assert item.status == 'clean' and not item.verification and not item.submitted
     assert item.source_issue == 0 and 'not bug proof' in item.notes[0]
+    assert item.research_id and item.research_id == lead['research_id']
     with pytest.raises(repo_research.Invalid, match='already exists'):
         repo_research.propose(cfg, 'source.py', 1, 'source review hypothesis needing actual reproduction')
 

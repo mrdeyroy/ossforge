@@ -37,6 +37,7 @@ class Item:
     work: str = "fix"  # fix | feature
     rank: float = 0.0
     hold_reason: str = ""  # unresolved clean work, not a detector false positive
+    research_id: str = ""  # exact originating repo investigation, not clone-path identity
     snippet: str = ""  # a few lines around the finding so a human can accept or reject it quickly
 
 
