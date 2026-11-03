@@ -6,7 +6,7 @@ from ossforge.outcomes import Stats
 
 
 def setup(monkeypatch, tmp_path):
-    cfg = Config(state_dir=str(tmp_path))
+    cfg = Config(state_dir=str(tmp_path), labels=['bug'])
     cfg.discovery_sampling = 'per-repo'
     stats = Stats(tmp_path/'stats.json')
     pool = ['org/a', 'org/b', 'org/c', 'org/d', 'org/dominant']
@@ -82,7 +82,7 @@ def test_scoped_cursor_initializes_from_existing_but_never_changes_baseline(monk
 def test_scoped_public_loop_routes_discovery_even_with_broad_default(monkeypatch, tmp_path):
     from ossforge import loop, patrol
     cfg = Config(state_dir=str(tmp_path), work_dir=str(tmp_path/'work'), kill_file=str(tmp_path/'STOP'),
-                 discovery_sampling='per-repo', discovery_strategy='broad', work_kind='fix')
+                 discovery_sampling='per-repo', discovery_strategy='broad', work_kind='fix', labels=['bug'])
     monkeypatch.setattr(patrol, 'patrol', lambda *a, **kw: [])
     calls = []
     def fake(*args, **kwargs):
@@ -101,3 +101,35 @@ def test_query_limit_change_resets_subturn_without_touching_prior_cursor(monkeyp
     discovery.discover(cfg, stats, 'python', 'bug', 12, 'breadth-first')
     discovery.discover(cfg, stats, 'python', 'bug', 3, 'breadth-first')
     assert 'repo:org/a' in calls[-1][0] and calls[-1][1] == 3
+
+
+def test_unsupported_multi_category_config_refuses_before_remote_effects(monkeypatch, tmp_path):
+    from ossforge import loop, patrol
+    cfg, stats, pool, calls, stopped = setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(discovery, 'discover_broad_repos', lambda *a: (_ for _ in ()).throw(AssertionError('remote pool fetch')))
+    monkeypatch.setattr(patrol, 'patrol', lambda *a, **kw: (_ for _ in ()).throw(AssertionError('remote patrol')))
+    for languages, labels in [(['python', 'go'], ['bug']), (['python'], ['bug', 'help wanted'])]:
+        cfg.languages, cfg.labels = languages, labels
+        assert discovery.discover(cfg, stats, 'python', 'bug', 12, 'breadth-first') == []
+        assert 'exactly one' in scout.LAST_FUNNEL['stopped']
+        assert any('exactly one' in note for note in loop.run_once(cfg))
+    assert not calls
+
+
+def test_combined_legacy_scout_cannot_abandon_expired_scoped_batch(monkeypatch, tmp_path):
+    from ossforge import gh
+    cfg = Config(state_dir=str(tmp_path), discovery_sampling='combined')
+    discovery_resume.save(tmp_path/'discovery-resume.json', 'old scoped query', 12,
+                          [{'repo': 'org/a', 'number': 1}], sampling='per-repo')
+    data = json.loads((tmp_path/'discovery-resume.json').read_text())
+    for row in data.values():
+        row['saved_at'] = 0
+    (tmp_path/'discovery-resume.json').write_text(json.dumps(data))
+    monkeypatch.setattr(gh, 'search_issues', lambda *a, **kw: (_ for _ in ()).throw(AssertionError('new scope fetched')))
+    assert scout.scout(cfg, query='new combined query') == []
+    assert 'original config' in scout.LAST_FUNNEL['stopped']
+    assert json.loads((tmp_path/'discovery-resume.json').read_text()) == data
+    cfg.discovery_sampling = 'per-repo'
+    assert scout.scout(cfg, query='old scoped query', limit=12) == []
+    assert 'expired' in scout.LAST_FUNNEL['stopped']
+    assert json.loads((tmp_path/'discovery-resume.json').read_text()) == data

@@ -130,6 +130,21 @@ def scout(
     out: list[Candidate] = []
     actual_query = query or build_query(language, label, cfg.min_stars)
     resume_path = cfg.path("discovery-resume.json")
+    # Mode/scope switches must not silently abandon any saved nonempty batch,
+    # including one whose TTL has expired. This check also covers legacy broad.
+    pending_rows = issue_reviews.load(resume_path)
+    active_key = discovery_resume._key(actual_query, limit)
+    if any(key != active_key and isinstance(row, dict) and row.get("remaining")
+           and (cfg.discovery_sampling == "per-repo" or row.get("sampling") == "per-repo")
+           for key, row in pending_rows.items()):
+        f["stopped"] = "unfinished discovery scope exists; finish it with its original config before changing query scope"
+        return []
+    row = pending_rows.get(active_key, {})
+    if (isinstance(row, dict) and row.get("remaining") and
+            (cfg.discovery_sampling == "per-repo" or row.get("sampling") == "per-repo") and
+            active_key not in discovery_resume._active(resume_path)):
+        f["stopped"] = "scoped discovery batch expired; inspect and explicitly reconcile saved positions before retrying"
+        return []
     pending = discovery_resume.load(resume_path, actual_query, limit)
     try:
         items = pending if pending is not None else gh.search_issues(actual_query, per_page=limit)
@@ -229,7 +244,7 @@ def scout(
         remaining = (items[_index:] if pending is not None else
                      [{'repo': it['repository_url'].split('repos/')[1], 'number': it['number']}
                       for it in items[_index:]])
-        discovery_resume.save(resume_path, actual_query, limit, remaining)
+        discovery_resume.save(resume_path, actual_query, limit, remaining, sampling=cfg.discovery_sampling)
     else:
         discovery_resume.save(resume_path, actual_query, limit, [])
     out.sort(key=lambda c: (c.verdict.decision != "approve", -c.score))

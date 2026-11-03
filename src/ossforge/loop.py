@@ -47,6 +47,10 @@ def _run_once(cfg: Config, run) -> list[str]:
         run.data["outcome"] = "halted"
         notes.append(f"halted: {e}")
         return notes
+    if cfg.discovery_sampling == "per-repo" and (len(cfg.languages) != 1 or len(cfg.labels) != 1):
+        run.data["outcome"] = "halted"
+        notes.append("halted: per-repo experiment requires exactly one configured language and label; no remote work started")
+        return notes
     gh.configure(cfg.path("cache"), cfg.cache_ttl_seconds)
     q = Queue(cfg.path("queue.json"))
     audit = safety.Audit(cfg.path("audit.jsonl"))

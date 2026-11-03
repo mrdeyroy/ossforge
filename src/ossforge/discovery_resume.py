@@ -37,11 +37,11 @@ def load(path: Path, query: str, limit: int) -> list[dict] | None:
     return batch
 
 
-def save(path: Path, query: str, limit: int, remaining: list[dict]) -> None:
+def save(path: Path, query: str, limit: int, remaining: list[dict], *, sampling: str = "combined") -> None:
     data = _active(path)
     key = _key(query, limit)
     data.pop(key, None)
     if remaining:
-        data[key] = {'saved_at': time.time(), 'remaining': remaining[:MAX_ITEMS]}
+        data[key] = {'saved_at': time.time(), 'remaining': remaining[:MAX_ITEMS], 'sampling': sampling}
     data = dict(sorted(data.items(), key=lambda p: p[1]['saved_at'])[-MAX_BATCHES:])
     issue_reviews._save(path, data)

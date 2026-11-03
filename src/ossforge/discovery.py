@@ -96,6 +96,11 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
              skip_repos: set[str] | None = None) -> list[scout.Candidate]:
     if cfg.discovery_sampling not in {"combined", "per-repo"}:
         raise ValueError("discovery_sampling must be combined or per-repo")
+    if cfg.discovery_sampling == "per-repo" and (len(cfg.languages) != 1 or len(cfg.labels) != 1):
+        scout.LAST_FUNNEL.clear()
+        scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0,
+                                stopped="per-repo experiment requires exactly one configured language and label; no remote work started")
+        return []
     state_path = cfg.path("discovery.json")
     state = issue_reviews.load(state_path)
     cursor_key = "breadth_cursor" if strategy == "breadth-first" else "cursor"
@@ -144,14 +149,15 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
         selected.query = scout.build_query(language, label, cfg.min_stars) + " repo:" + selected.repos[0]
     # Do not abandon another scope's unfinished batch by changing sampling mode.
     # Finish that public run with its original config before switching the experiment.
-    pending_batches = discovery_resume._active(cfg.path("discovery-resume.json"))
+    pending_batches = issue_reviews.load(cfg.path("discovery-resume.json"))
     active_key = discovery_resume._key(selected.query, limit)
-    if cfg.discovery_sampling == "per-repo" and any(
+    if any(
             key != active_key and isinstance(value, dict) and value.get("remaining")
+            and (cfg.discovery_sampling == "per-repo" or value.get("sampling") == "per-repo")
             for key, value in pending_batches.items()):
         scout.LAST_FUNNEL.clear()
         scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0,
-                                stopped="unfinished discovery scope exists; finish it with its original config before per-repo sampling")
+                                stopped="unfinished discovery scope exists; finish it with its original config before changing query scope")
         return []
     if selected.strategy != "broad" and not selected.repos:
         scout.LAST_FUNNEL.clear()

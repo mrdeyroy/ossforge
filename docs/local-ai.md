@@ -286,9 +286,17 @@ a changed pool/query category resets that index, while a partial pass retains it
 Inspect `sampling`, `sample_index`, `repository_pool`, `repos` and `query` in the
 funnel for attribution. With no confirmed pool it refuses unscoped fallback.
 
+The experiment supports exactly one configured language and one label. Multiple
+languages or daily label rotation refuse before remote work, because a shared
+subturn index would otherwise keep resetting and starve the tail of the pool.
+
 Finish saved partial batches with their original config before switching modes.
-A nonempty active batch belonging to another scope refuses the new mode rather
-than silently abandoning work. This experiment guarantees targeted query scope,
+A nonempty saved batch belonging to another scope refuses a switch involving
+per-repo mode in either direction, including the legacy broad/combined path.
+This preservation check does not ignore an expired batch. An expired scoped
+batch at its original scope also refuses automatic retry: inspect its saved
+positions and explicitly reconcile it first, never silently drop it. Normal
+combined-to-combined query rotation retains its prior behavior. This experiment guarantees targeted query scope,
 not eligible issue yield or exhaustive search. It still samples only the latest
 issue page and can return zero matches or genuine competing work. Compare actual
 paced run results, not controlled fixtures, before judging contribution yield.
