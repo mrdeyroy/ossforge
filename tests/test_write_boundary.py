@@ -888,3 +888,26 @@ def test_stale_verified_submit_cannot_publish_changed_proposal(world, field, val
         run(world, execute=True)
     assert writes(world['log']) == []
     assert getattr(queue.Queue(q.path).items[changed.id], field) == value
+
+
+def test_production_completed_result_cannot_reenter_publication(world):
+    import copy
+    world['cfg'].max_open_prs_per_repo = 2  # unrelated cap must not mask duplicate-effect defect
+    q = queue.Queue(world['cfg'].path('queue.json'))
+    q.add(world['it'])
+    q.save()
+    stale = copy.deepcopy(world['it'])
+    result = run(world, execute=True)
+    # Match all three actual callers' finalization, not the crash-progress shape.
+    q = queue.Queue(q.path)
+    q.set('a', status='submitted', submitted=result)
+    q.save()
+    before_calls = world['log'].read_bytes()
+    before_queue = q.path.read_bytes()
+    before_allowance = world['lim'].remaining()
+    for item in (stale, q.items['a']):
+        with pytest.raises(submit.Refused, match='already submitted'):
+            submit.submit(item, world['lim'], world['cfg'], world['audit'], execute=True)
+    assert world['log'].read_bytes() == before_calls
+    assert q.path.read_bytes() == before_queue
+    assert world['lim'].remaining() == before_allowance
