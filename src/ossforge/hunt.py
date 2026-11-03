@@ -48,6 +48,8 @@ def clone(cfg: Config, repo: str) -> Path:
         problems = identity.check_upstream(str(dest), repo)
         if problems:
             raise RuntimeError("; ".join(problems) + "; existing checkout preserved")
+    from .preparation import public_guard
+    public_guard(dest)
     return dest
 
 

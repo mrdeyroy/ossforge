@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import qualification, agent_next, duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
+from . import preparation, qualification, agent_next, duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
 from . import dedupe, research_session, repo_research, admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -64,12 +64,17 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--detail", required=True)
     rp.add_argument("--source-issue", type=int, default=0, help="adopt a matching open issue at least 48h old, with fresh eligibility and duplicate checks")
     rr.add_argument("--defer", default="", metavar="REASON")
+    add("preparation-task", "show current local-only investigation, never a public queue task")
+    pc = add("preparation-commit", "identity-checked local preparation commit")
+    pc.add_argument("-m", "--message", required=True)
+    add("preparation-verify", "native-check local patch and retain drafts, never publish", "result_file")
     add("radar", "score a repo's health", "repo")
     prv = add("policy-review", "show a repo's policy docs (URLs, SHAs) and optionally record YOUR review before submitting", "repo")
     prv.add_argument("--accept", action="store_true", help="record that you read the docs and the repo's own pages")
     prv.add_argument("--prohibited", action="store_true", help="record that the repo's rules forbid this contribution")
     prv.add_argument("--publication-route", choices=["issue_pr", "pr_only", "issue_first", "unresolved"], help="source-backed route after reading contribution rules; not owner consent")
     prv.add_argument("--extra-path", action="append", default=[], help="exact linked in-repository contribution file to pin and recheck")
+    prv.add_argument("--local-preparation", choices=["allowed", "forbidden", "unresolved"], default="unresolved", help="source-scoped local modification decision, never public permission")
     prv.add_argument("--note", default="", help="restrictions that apply, in your words")
     dr = add("review-duplicate", "record one reviewed false positive for this exact verified candidate", "id")
     dr.add_argument("number", type=int)
@@ -194,10 +199,21 @@ def main(argv: list[str] | None = None) -> int:
                               repo_research.defer(cfg, a.defer) if a.defer else
                               repo_research.begin(cfg) if a.begin else
                               repo_research.refresh(cfg) if a.refresh else repo_research.prepare(cfg))
-        except (research_session.Invalid, repo_research.Invalid, dedupe.Incomplete, gh.ReadBudgetExceeded, gh.GhError, safety.Blocked) as exc:
+        except (ValueError, research_session.Invalid, repo_research.Invalid, dedupe.Incomplete, gh.ReadBudgetExceeded, gh.GhError, safety.Blocked) as exc:
             print(f"REFUSED: {exc}", file=sys.stderr)
             return 1
         emit(result)
+    elif a.cmd in {"preparation-task", "preparation-commit", "preparation-verify"}:
+        try:
+            with repo_research.locked(cfg):
+                safety.kill_switch(cfg)
+                result = (preparation.task(cfg) if a.cmd == "preparation-task" else
+                          preparation.commit(cfg, a.message) if a.cmd == "preparation-commit" else
+                          preparation.complete(cfg, driver.parse(Path(a.result_file))))
+            emit(result)
+        except (ValueError, OSError, evidence.StaleEvidence, identity.IdentityError, safety.Blocked, gh.GhError) as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 1
     elif a.cmd == "doctor":
         results = doctor.check(cfg)
         if a.json:
@@ -241,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
             if not a.note.strip():
                 print("--note is required: state the restrictions that apply (or 'none found after reading X')")
                 return 2
-            rec = policy_review.record(cfg, a.repo, snap, a.note, prohibited=a.prohibited, publication_route=a.publication_route)
+            rec = policy_review.record(cfg, a.repo, snap, a.note, prohibited=a.prohibited, publication_route=a.publication_route, local_preparation=a.local_preparation)
             print("recorded:", json.dumps({k: v for k, v in rec.items() if k != "docs"}), f"{len(rec['docs'])} doc(s) pinned")
         else:
             print(f"{a.repo}: {len(snap['docs'])} policy-bearing doc(s) found in the scanned locations; anti-AI wording: {snap['anti_ai']}")
@@ -384,7 +400,7 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "agent-task":
         try:
             emit(driver.task(q, a.item))
-        except (OSError, evidence.StaleEvidence, submit.Refused) as exc:
+        except (ValueError, OSError, evidence.StaleEvidence, submit.Refused) as exc:
             print(f"REFUSED: {exc}", file=sys.stderr)
             return 1
     elif a.cmd == "agent-verify":
@@ -414,6 +430,11 @@ def main(argv: list[str] | None = None) -> int:
             print("REFUSED: held work must be explicitly unheld after resolving its prerequisite", file=sys.stderr)
             return 1
         clone = Path(it.clone)
+        try:
+            preparation.public_guard(clone)
+        except ValueError as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 1
         if not a.tests and not a.test_command:
             print("verify requires --tests or --test-command", file=sys.stderr)
             return 2
@@ -459,6 +480,12 @@ def main(argv: list[str] | None = None) -> int:
         if not allowed or it.submitted or (a.cmd == "hold" and not a.reason.strip()):
             print(f"REFUSED: {a.cmd} requires {expected} work without publication progress and a nonempty hold reason", file=sys.stderr)
             return 1
+        if a.cmd == "unhold" and it.clone:
+            try:
+                preparation.public_guard(it.clone)
+            except ValueError as exc:
+                print(f"REFUSED: {exc}", file=sys.stderr)
+                return 1
         resumed = "found" if it.kind == "issue" and it.source_issue and not it.clone else "clean"
         q.set(a.id, status="held" if a.cmd == "hold" else resumed,
               hold_reason=a.reason.strip() if a.cmd == "hold" else "")

@@ -479,3 +479,40 @@ permission or policy override. A new revision needs a new review. `--begin`
 requires a conventional code layout or this current source-backed feasibility
 review; the normal policy, checkout, duplicate and native verification gates
 remain required.
+
+## Conditional local-only preparation
+
+The repository-first flow can keep a contribution local when a current source-scoped
+policy review permits independent local modification but public contribution is
+restricted. This is not a blanket exception for AI-prohibited repositories. Read the
+license and contribution rules together. If local use is forbidden or its scope is
+unclear, stop before preparing code. A license may permit independent modification
+without the community guide explicitly discussing private development.
+
+Record that scope with the existing source review, for example:
+
+```
+ossforge policy-review owner/repo --prohibited --local-preparation allowed --note 'Exact source-backed scope and restrictions after reading the license and linked guides'
+ossforge research-repo --begin
+```
+
+`--begin` routes a qualified restricted lead to a separate local preparation checkout
+and journal, not a clean or verified publication queue item. Other repository health,
+native-suitability, access, session and STOP gates remain. Ordinary allowed contribution
+work keeps its existing route. No policy scan result alone permits preparation.
+
+Use `preparation-task` to inspect the local investigation, create a focused regression
+and fix, and use `preparation-commit -m 'message'` for an identity-checked local commit.
+The result JSON uses the existing external result schema, with the ID and base from
+`preparation-task`. `preparation-verify RESULT.json` runs actual native fail-before,
+pass-after and check commands, then retains a patch, issue/PR draft JSON and evidence
+under local preparation artifacts. It stops at `awaiting_owner_review`; these paths
+are local outputs, not hosted or automatically delivered files.
+
+No fork, push, issue, comment or PR is created. A preparation origin marker prevents
+accidental reuse through normal public task, verify, unhold and submit paths, including
+Git worktrees that share a common Git directory. It is not tamper-proof isolation.
+Removing a marker never supplies policy permission. Owner review does not erase AI
+origin, waive required disclosure or override source restrictions. Independent fork
+publication is a separate action requiring its own source/target/visibility and owner
+approval checks; it is not implemented by these commands or implied by local success.
