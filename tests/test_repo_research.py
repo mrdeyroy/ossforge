@@ -196,8 +196,9 @@ def test_deferral_scope_and_exhaustion_do_not_reselect_rejections(tmp_path, monk
     assert repo_research.prepare(cfg)['status'] == 'repo_pool_exhausted'
     assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')['status'] == 'repo_pool_exhausted'
     assert len(repo_research.load(cfg)['deferred']) == 2
-    cfg.min_stars += 1  # deliberate selection-scope change permits reassessment
-    assert repo_research.prepare(cfg)['repo'] == 'org/one'
+    cfg.min_stars += 1  # active session refuses scope changes before reassessment
+    with pytest.raises(research_session.Invalid, match='configuration changed'):
+        repo_research.prepare(cfg)
 
 
 def test_begin_empty_checkout_returns_actionable_refusal(monkeypatch, tmp_path):
