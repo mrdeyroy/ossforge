@@ -17,6 +17,7 @@ from pathlib import Path
 from . import acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit
 from .queue import Item, Queue, item_id
 from .config import Config
+from . import research_session
 
 
 class Invalid(ValueError):
@@ -77,12 +78,14 @@ def prepare(cfg: Config) -> dict:
     """One bounded repository selection and source collection, no issue query."""
     safety.kill_switch(cfg)
     data = load(cfg)
+    if not data['lead'] and data.get('exhausted', {}).get('scope') == _selection_scope(cfg):
+        return data['exhausted']
     if data['lead'] is not None:
         return data['lead']  # explicit refresh/defer, never silently replace a lead
     if len(cfg.languages) != 1:
         raise Invalid('repo-first research requires exactly one configured language')
-    with gh.read_budget(cfg.discovery_read_budget_seconds):
-        pool = discovery.discover_broad_repos(cfg, cfg.languages[0], data['cursor'] // 5)
+    with gh.read_budget(research_session.allowance(cfg) if cfg.repo_first else cfg.discovery_read_budget_seconds):
+        pool = discovery.discover_broad_repos(cfg, cfg.languages[0], data.get('window', data['cursor'] // 5))
         if not pool:
             raise Invalid('repository pool unavailable; cursor unchanged, not proof of no work')
         scope = _selection_scope(cfg)
@@ -105,6 +108,19 @@ def prepare(cfg: Config) -> dict:
     return refresh(cfg)
 
 
+def next_window(cfg: Config) -> dict:
+    """Explicit continuation within the same budget, never reset rejections."""
+    safety.kill_switch(cfg)
+    research_session.allowance(cfg)
+    data = load(cfg)
+    if data['lead'] or not data.get('exhausted'):
+        raise Invalid('finish or defer the current lead and exhaust its window before advancing')
+    data['window'] = data.get('window', data['cursor'] // 5) + 1
+    data.pop('exhausted', None)
+    _save(cfg, data)
+    return prepare(cfg)
+
+
 def refresh(cfg: Config) -> dict:
     safety.kill_switch(cfg)
     data = load(cfg)
@@ -112,7 +128,7 @@ def refresh(cfg: Config) -> dict:
     if not lead:
         raise Invalid('no selected repository; run research-repo first')
     repo = lead['repo']
-    with gh.read_budget(cfg.discovery_read_budget_seconds):
+    with gh.read_budget(research_session.allowance(cfg) if cfg.repo_first else cfg.discovery_read_budget_seconds):
         restriction = repo_access.pr_restriction(repo)
         health = radar.analyze(repo)
         outside = acceptance.evidence(repo)
@@ -272,7 +288,8 @@ def propose(cfg: Config, path: str, line: int, detail: str) -> dict:
 def checkpoint(cfg: Config, prefix: list[str]) -> dict:
     data = load(cfg)
     if not data['lead'] and data.get('exhausted', {}).get('scope') == _selection_scope(cfg):
-        return {'schema': 1, 'local_only': True, **data['exhausted']}
+        return {'schema': 1, 'local_only': True, **data['exhausted'],
+                'next_argv': prefix + ['research-repo', '--next-window']}
     if data['lead']:
         # Checkpoint is routing context, not a repeated dump of all documents.
         lead = dict(data['lead'])

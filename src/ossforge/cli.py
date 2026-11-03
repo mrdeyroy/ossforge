@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import qualification, agent_next, duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
-from . import dedupe, repo_research, admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
+from . import dedupe, research_session, repo_research, admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -48,9 +48,13 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     add("consent-check", "read explicit maintainer admission, without executing or publishing", "repo", issue={"type": int, "default": 0})
+    rs = add("research-session", "start or inspect a bounded repo-search session; resume never extends it")
+    rs.add_argument("--seconds", type=float)
+    rs.add_argument("--new", action="store_true", help="explicitly replace an exhausted session, preserving history")
     rr = add("research-repo", "select and collect a durable repo-first research lead without issue search")
     rr.add_argument("--refresh", action="store_true")
     rr.add_argument("--begin", action="store_true")
+    rr.add_argument("--next-window", action="store_true", help="explicitly continue exhausted-window search without extending session budget")
     rp = add("research-propose", "record an IDE source-reviewed hypothesis in the selected clean checkout", "path")
     rp.add_argument("line", type=int)
     rp.add_argument("--detail", required=True)
@@ -163,18 +167,24 @@ def main(argv: list[str] | None = None) -> int:
     def emit(obj) -> None:
         print(json.dumps(obj, indent=2, default=lambda o: dataclasses.asdict(o) if dataclasses.is_dataclass(o) else str(o)))
 
-    if a.cmd in {"research-repo", "research-propose"}:
+    if a.cmd in {"research-repo", "research-propose", "research-session"}:
         try:
             with repo_research.locked(cfg):
-                if a.cmd == "research-propose":
+                if a.cmd == "research-session":
+                    safety.kill_switch(cfg)
+                    if a.new and a.seconds is None:
+                        raise research_session.Invalid("--new requires an explicit --seconds budget")
+                    result = research_session.start(cfg, a.seconds, new=a.new) if a.seconds is not None else research_session.status(cfg)
+                elif a.cmd == "research-propose":
                     result = repo_research.propose(cfg, a.path, int(a.line), a.detail)
                 else:
-                    if sum(bool(v) for v in (a.defer, a.refresh, a.begin)) > 1:
-                        raise repo_research.Invalid('choose only one of --defer, --refresh or --begin')
-                    result = (repo_research.defer(cfg, a.defer) if a.defer else
+                    if sum(bool(v) for v in (a.defer, a.refresh, a.begin, a.next_window)) > 1:
+                        raise repo_research.Invalid('choose only one research-repo action')
+                    result = (repo_research.next_window(cfg) if a.next_window else
+                              repo_research.defer(cfg, a.defer) if a.defer else
                               repo_research.begin(cfg) if a.begin else
                               repo_research.refresh(cfg) if a.refresh else repo_research.prepare(cfg))
-        except (repo_research.Invalid, dedupe.Incomplete, gh.ReadBudgetExceeded, gh.GhError, safety.Blocked) as exc:
+        except (research_session.Invalid, repo_research.Invalid, dedupe.Incomplete, gh.ReadBudgetExceeded, gh.GhError, safety.Blocked) as exc:
             print(f"REFUSED: {exc}", file=sys.stderr)
             return 1
         emit(result)

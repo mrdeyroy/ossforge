@@ -1,7 +1,13 @@
 import pytest
-from ossforge import repo_research, agent_next, radar, acceptance
+from ossforge import repo_research, agent_next, radar, acceptance, research_session
 from ossforge.config import Config
 from ossforge.queue import Queue
+
+
+def prepare(cfg):
+    if cfg.repo_first and not cfg.path('research_session.json').exists():
+        research_session.start(cfg, 3600)
+    return repo_research.prepare(cfg)
 
 
 def setup_sources(monkeypatch):
@@ -20,7 +26,7 @@ def test_repo_first_without_any_issue_or_queue_entry(monkeypatch, tmp_path):
     cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'), repo_first=True)
     (tmp_path/'discovery-resume.json').write_text('{"saved-five": {"remaining": [1,2,3,4,5]}}')
     original = (tmp_path/'discovery-resume.json').read_bytes()
-    lead = repo_research.prepare(cfg)
+    lead = prepare(cfg)
     assert lead['repo'] == 'org/one' and lead['revision'] == 'exact-tip'
     assert lead['status'] == 'repo_review_needed' and lead['outside_contributions']['status'] == 'unknown'
     q = Queue(tmp_path/'queue.json')
@@ -28,9 +34,9 @@ def test_repo_first_without_any_issue_or_queue_entry(monkeypatch, tmp_path):
     assert next_step['status'] == 'repo_research' and next_step['lead']['repo'] == lead['repo']
     assert not q.items and not (tmp_path/'queue.json').exists()
     assert (tmp_path/'discovery-resume.json').read_bytes() == original
-    assert repo_research.prepare(cfg) == lead
+    assert prepare(cfg) == lead
     repo_research.defer(cfg, 'linked guide requires invitation, none for this work')
-    assert repo_research.prepare(cfg)['repo'] == 'org/two'
+    assert prepare(cfg)['repo'] == 'org/two'
 
 
 def test_partial_collection_preserves_selected_repo(monkeypatch, tmp_path):
@@ -38,7 +44,7 @@ def test_partial_collection_preserves_selected_repo(monkeypatch, tmp_path):
     cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'))
     monkeypatch.setattr(repo_research.policy_review, 'snapshot', lambda r: (_ for _ in ()).throw(repo_research.gh.GhError('unavailable')))
     with pytest.raises(repo_research.gh.GhError):
-        repo_research.prepare(cfg)
+        prepare(cfg)
     assert repo_research.load(cfg)['lead']['status'] == 'collecting'
     assert repo_research.load(cfg)['cursor'] == 0
 
@@ -47,10 +53,10 @@ def test_invalid_state_and_stop_do_not_search(monkeypatch, tmp_path):
     cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'))
     (tmp_path/'repo_research.json').write_text('{broken')
     with pytest.raises(repo_research.Invalid):
-        repo_research.prepare(cfg)
+        prepare(cfg)
     (tmp_path/'STOP').write_text('stop')
     with pytest.raises(repo_research.safety.Blocked):
-        repo_research.prepare(cfg)
+        prepare(cfg)
 
 
 def test_existing_local_work_still_wins_over_repo_research(tmp_path):
@@ -81,7 +87,7 @@ def test_begin_and_propose_public_path_is_hypothesis_not_verified(monkeypatch, t
     monkeypatch.setattr(repo_research.dedupe, 'find_matches', lambda *a, **kw: [])
     monkeypatch.setattr(repo_research.dedupe, 'recent_commit_hits', lambda *a, **kw: [])
     cfg = Config(state_dir=str(tmp_path/'state'), kill_file=str(tmp_path/'STOP'), repo_first=True)
-    repo_research.prepare(cfg)
+    prepare(cfg)
     lead = repo_research.begin(cfg)
     assert lead['status'] == 'investigating'
     assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')['status'] == 'repo_investigation'
@@ -106,7 +112,7 @@ def test_begin_and_propose_public_path_is_hypothesis_not_verified(monkeypatch, t
 def test_policy_prerequisite_refuses_before_clone(monkeypatch, tmp_path):
     setup_sources(monkeypatch)
     cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'))
-    repo_research.prepare(cfg)
+    prepare(cfg)
     monkeypatch.setattr(repo_research.policy_review, 'check', lambda *a: 'no policy review recorded')
     monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: (_ for _ in ()).throw(AssertionError('clone reached')))
     with pytest.raises(repo_research.Invalid, match='policy review'):
@@ -118,7 +124,7 @@ def test_current_prohibition_remains_hold_not_permission(monkeypatch, tmp_path):
     cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'))
     monkeypatch.setattr(repo_research.policy_review, 'snapshot', lambda r:
                         {'docs': [], 'anti_ai': False, 'agent_review': ['conditional restriction']})
-    lead = repo_research.prepare(cfg)
+    lead = prepare(cfg)
     assert 'agent-specific' in lead['holds'][0]
     monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: (_ for _ in ()).throw(AssertionError('clone reached')))
     with pytest.raises(repo_research.Invalid, match='restriction'):
@@ -128,7 +134,7 @@ def test_current_prohibition_remains_hold_not_permission(monkeypatch, tmp_path):
 def test_checkpoint_exposes_after_review_step_and_invalid_state(monkeypatch, tmp_path):
     setup_sources(monkeypatch)
     cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'), repo_first=True)
-    repo_research.prepare(cfg)
+    prepare(cfg)
     checkpoint = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'chosen.yml')
     assert checkpoint['after_source_review_argv'][-2:] == ['research-repo', '--begin']
     cfg.path('repo_research.json').write_text('{broken')
@@ -152,7 +158,7 @@ def test_checkpoint_compacts_policy_text_without_discarding_saved_source(monkeyp
                         {'docs': [{'path': 'README.md', 'url': 'https://github.com/org/one/blob/main/README.md',
                                    'sha': 'policy-sha', 'text': 'full source text'}],
                          'anti_ai': False, 'agent_review': []})
-    repo_research.prepare(cfg)
+    prepare(cfg)
     result = repo_research.checkpoint(cfg, ['ossforge'])
     assert 'text' not in result['lead']['policy']['docs'][0]
     assert repo_research.load(cfg)['lead']['policy']['docs'][0]['text'] == 'full source text'
@@ -169,7 +175,7 @@ def test_held_and_qualification_are_visible_without_blocking_independent_researc
     # An explicit independent research command remains reachable, not an
     # automatic unhold or a review dismissal.
     setup_sources(monkeypatch)
-    assert repo_research.prepare(cfg)['status'] == 'repo_review_needed'
+    assert prepare(cfg)['status'] == 'repo_review_needed'
     assert agent_next.next_step(cfg, q, 'cfg')['status'] == 'held_work'
     q.items.clear()
     monkeypatch.setattr(agent_next.qualification, 'pending', lambda *a: [{'repo': 'org/review', 'number': 42}])
@@ -182,7 +188,7 @@ def test_held_and_qualification_are_visible_without_blocking_independent_researc
 def test_deferral_scope_and_exhaustion_do_not_reselect_rejections(tmp_path, monkeypatch):
     setup_sources(monkeypatch)
     cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'), repo_first=True)
-    repo_research.prepare(cfg)
+    prepare(cfg)
     repo_research.defer(cfg, 'no supported native reproduction')
     repo_research.prepare(cfg)
     repo_research.defer(cfg, 'contribution prerequisite unresolved')
@@ -190,8 +196,9 @@ def test_deferral_scope_and_exhaustion_do_not_reselect_rejections(tmp_path, monk
     assert repo_research.prepare(cfg)['status'] == 'repo_pool_exhausted'
     assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')['status'] == 'repo_pool_exhausted'
     assert len(repo_research.load(cfg)['deferred']) == 2
-    cfg.min_stars += 1  # deliberate selection-scope change permits reassessment
-    assert repo_research.prepare(cfg)['repo'] == 'org/one'
+    cfg.min_stars += 1  # active session refuses scope changes before reassessment
+    with pytest.raises(research_session.Invalid, match='configuration changed'):
+        repo_research.prepare(cfg)
 
 
 def test_begin_empty_checkout_returns_actionable_refusal(monkeypatch, tmp_path):

@@ -565,6 +565,11 @@ requires the existing source-pinned policy review and all other gates. Choose ot
 while a restriction remains unresolved. Literal matching is conservative and incomplete.
 
 Repo-first research is available as a staged opt-in with `repo_first: true`.
+Start a bounded session with `ossforge research-session --seconds 3600` (for
+example, one hour). `research-session` reports remaining time; resume does not
+extend it. After exhaustion, choose a new session explicitly with
+`research-session --new --seconds 3600`. Existing investigation and verification
+are not a whole-contribution timeout. Search has no background scheduler.
 `agent-next` then selects a repository-research checkpoint independently of open
 issue search, using `research-repo`, policy-reviewed `research-repo --begin`, and
 `research-propose PATH LINE --detail ...`. The IDE AI investigates code and owns

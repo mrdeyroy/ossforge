@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from . import repo_research, qualification, driver, evidence, submit
+from . import research_session, repo_research, qualification, driver, evidence, submit
 from .config import Config
 from .queue import Queue
 
@@ -96,8 +96,15 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
                       warning="independent discovery may continue; unhold only after its prerequisite is resolved")
     if cfg.repo_first:
         try:
+            lead = repo_research.load(cfg)['lead']
+            if not lead or lead['status'] != 'investigating':
+                session = research_session.status(cfg)
+                if session['status'] != 'search_session_active':
+                    return result(session['status'], session=session,
+                                  next_argv=prefix + ['research-session'],
+                                  warning='choose an explicit search budget; resume never extends it, exhausted search is not proof of no opportunity')
             return repo_research.checkpoint(cfg, prefix)
-        except repo_research.Invalid as exc:
+        except (research_session.Invalid, repo_research.Invalid) as exc:
             return result("inspect_local", reason=str(exc), warning="preserve repository research state; do not reset it")
     completed = [i for i in queue.items.values() if i.submitted.get("pr_url") or i.submitted.get("pr")]
     return result("no_work", reason="no locally actionable candidate; not proof that no opportunity exists",

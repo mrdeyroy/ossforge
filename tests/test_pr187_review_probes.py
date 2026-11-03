@@ -1,6 +1,6 @@
 """Independent review probes for ossforge PR #187 (repo-first research)."""
 import subprocess
-from ossforge import repo_research, agent_next, radar, acceptance, policy_review, gh
+from ossforge import repo_research, agent_next, radar, acceptance, policy_review, gh, research_session
 from ossforge.config import Config
 from ossforge.queue import Queue, Item, item_id
 
@@ -40,6 +40,7 @@ def begin_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(repo_research.dedupe, 'find_matches', lambda *a, **kw: [])
     monkeypatch.setattr(repo_research.dedupe, 'recent_commit_hits', lambda *a, **kw: [])
     cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
+    research_session.start(cfg, 3600) if cfg.repo_first and not cfg.path('research_session.json').exists() else None
     repo_research.prepare(cfg)
     repo_research.begin(cfg)
     return cfg, root
@@ -49,6 +50,7 @@ def test_begin_with_issue_first_route_raises_bare_ValueError_not_Invalid(monkeyp
     """CLI catches repo_research.Invalid but publication_route raises plain ValueError."""
     setup_sources(monkeypatch)
     cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'))
+    research_session.start(cfg, 3600) if cfg.repo_first and not cfg.path('research_session.json').exists() else None
     repo_research.prepare(cfg)
     monkeypatch.setattr(repo_research.policy_review, 'check', lambda *a, **kw: '')
     # Restore the REAL publication_route with a recorded issue_first route.
@@ -82,6 +84,7 @@ def test_begin_dirty_existing_clone_raises_RuntimeError(monkeypatch, tmp_path):
     """hunt.clone raises plain RuntimeError; CLI research branch does not catch it."""
     cfg, root = begin_ready(monkeypatch, tmp_path)
     repo_research.defer(cfg, 'done with one')
+    research_session.start(cfg, 3600) if cfg.repo_first and not cfg.path('research_session.json').exists() else None
     repo_research.prepare(cfg)  # selects org/two
     monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: (_ for _ in ()).throw(RuntimeError('existing checkout is dirty or incomplete; preserve it and inspect before retry')))
     try:

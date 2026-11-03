@@ -27,15 +27,23 @@ Do not start a nested model process just because you are already an AI assistant
 > not hold. A rule change requires rereading, not changing the owner's authority.
 >
 > For repository-first code investigation, use `repo_first: true` in the chosen
-> config. This staged route does not yet implement automatic eligible-existing-
-> issue adoption or a session search-budget controller; do not claim the whole
-> workflow is proven from repository selection alone.
+> config. This staged route includes a session search-budget controller, but
+> not eligible-existing-issue adoption yet; do not claim the whole workflow is
+> proven from repository selection alone.
 > Run `ossforge --config ossforge.yaml agent-next` after startup and each step.
 > - repo_research: follow the repo-first investigation section below. Read the
 >   collected suitability/policy evidence and linked rules. Record the ordinary
 >   source-backed review, then use the supplied --begin command only when the
 >   rules allow this work. Otherwise defer with a specific reason and continue
 >   to another selected repo within the session's approved search budget.
+> - search_session_needed: ask the owner for the session search allowance if it
+>   was not supplied, then run research-session --seconds SECONDS.
+> - repo_pool_exhausted: this is the current bounded window, not all GitHub.
+>   Follow the supplied research-repo --next-window only within the same active
+>   session budget; do not repeat plain searches or clear deferred history.
+> - search_budget_exhausted: stop new repository search. Summarize what was
+>   checked; do not extend or restart the budget silently. Existing source
+>   investigation/native verification can continue without new repository search.
 > - repo_investigation: inspect the clean selected source semantically. The IDE
 >   AI diagnoses bugs, chooses fixes and writes issue/PR explanations. Static
 >   hunt hints are optional. Use research-propose for a source-reviewed new
@@ -358,6 +366,19 @@ contribution success.
 Set `repo_first: true` in the chosen config to use repository research when there
 is no existing actionable queue item. This does not change identity or authority.
 The issue-only compatibility route remains available with `repo_first: false`.
+
+Start the session explicitly: `research-session --seconds 3600` is a one-hour
+example, not a mandatory timeout. Elapsed wall time includes interruptions.
+`research-session` reads status and does not reset its deadline. Config changes
+that affect selection or identity stop resume for inspection. Restore the original
+config to resume, or explicitly start a new session after expiry; never silently
+reset the budget to escape configuration drift. An expired session
+needs `research-session --new --seconds SECONDS` to start another, preserving the
+previous record in history. The IDE must not silently renew a user's allowance.
+Local source investigation and native verification are separate from repository
+search; an expired budget does not discard a checkout, queue or saved issue batch.
+No schedule, daemon or model call is started. Per-command read pacing/cooldowns
+still apply inside the remaining session budget.
 Saved issue batches and issue cursors are not modified by repository research.
 
 Follow `agent-next` as usual:
@@ -406,8 +427,8 @@ star/health thresholds and preferred repositories). They are not assertions that
 upstream can never change. Selection does not wrap back to a deferred repository
 in the same scope; an exhausted current bounded search window returns `repo_pool_exhausted`.
 This is not proof of global exhaustion or that no suitable repository exists.
-Inspect saved reasons before explicitly searching another window; the next
-session-controller stage will expose window advancement. A deliberate selection
+Inspect saved reasons before explicitly searching another window; `research-repo --next-window` explicitly advances to another bounded search
+window without extending the session deadline or clearing rejection history. A deliberate selection
 scope change can permit reassessment, but is not needed as proof of exhaustion. There is no automatic rejection expiry that silently repeats work.
 
 Existing pending issue handoffs, incomplete issue-search journals, qualification
