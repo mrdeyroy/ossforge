@@ -173,6 +173,23 @@ def main(argv: list[str] | None = None) -> int:
         Path(cfg.kill_file).unlink(missing_ok=True)
         print("kill switch off")
         return 0
+    # Direct commands must honor STOP too, even when an IDE skips agent-next.
+    # Keep read-only inspection and explicit emergency resume available.
+    mutating = a.cmd in {
+        'bootstrap', 'research-repo', 'research-propose', 'research-review',
+        'preparation-commit', 'preparation-verify', 'prepare', 'commit', 'hunt',
+        'agent-run', 'agent-verify', 'verify', 'hold', 'unhold', 'reject',
+        'review-duplicate', 'review-commit-match', 'review-issue', 'reconsider-issue',
+        'submit', 'post-critique', 'loop', 'digest', 'discover'}
+    mutating = mutating or (a.cmd == 'research-session' and a.seconds is not None)
+    mutating = mutating or (a.cmd == 'policy-review' and (a.accept or a.prohibited))
+    mutating = mutating or (a.cmd == 'review-qualification' and bool(a.defer))
+    if mutating:
+        try:
+            safety.kill_switch(cfg)
+        except safety.Blocked as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 1
     q, audit, stats, limiter = _ctx(cfg)
     if getattr(a, "id", None) is not None and a.id not in q.items:
         print(f"unknown queue id {a.id!r}. Run `queue` to list ids.", file=sys.stderr)

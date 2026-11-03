@@ -593,3 +593,10 @@ fetching GitHub policy documents. It labels that policy `saved_unvalidated`,
 never current clearance. Explicit `preparation-task`, commit and verification
 still recheck live policy. An outage cannot silently clear a publication hold;
 changed or invalid local receipts still stop the checkpoint for inspection.
+
+Direct mutating CLI workflow commands check STOP before loading queue state or
+starting work, even if the assistant skips `agent-next`. This includes native
+verification, commit/prepare, queue decisions, research writes, discovery and
+publication. Read-only inspection and explicit `resume` remain available.
+STOP is a command-entry guard, not a sandbox or a guarantee that an already
+running native subprocess is interrupted; preserve its state before resuming.
