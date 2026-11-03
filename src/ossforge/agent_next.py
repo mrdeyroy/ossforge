@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from . import driver, evidence, submit
+from . import qualification, driver, evidence, submit
 from .config import Config
 from .queue import Queue
 
@@ -81,6 +81,13 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
         return result("review_incomplete_discovery", reason="previous run is partial or incomplete, not a clean no-find",
                       prior_status=last["status"], next_argv=prefix + ["loop", "--once", "--prepare-only"],
                       warning="inspect the run journal; retry only after its prerequisite or cooldown is resolved")
+    reviews = qualification.pending(cfg.path("qualification.json"))
+    if reviews:
+        lead = sorted(reviews, key=lambda r: (r["repo"], r["number"]))[0]
+        return result("review_needed", lead=lead,
+                      review_argv=prefix + ["review-qualification", lead["repo"], str(lead["number"])],
+                      next_argv=prefix + ["loop", "--once", "--prepare-only"],
+                      warning="Saved references are not current truth or proof of a fix. Refresh and inspect implementation, policy and discussion. No automatic approval/coding/publication; independent discovery may continue. Use review-qualification --defer REASON to pause this review.")
     held = queue.by_status("held")
     if held:
         return result("held_work", reason="unresolved held work is excluded from coding selection, not rejected or verified",

@@ -12,7 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import discovery, digest, gh, hunt, patrol, safety, scout, submit, runs, vet, radar
+from . import qualification, discovery, digest, gh, hunt, patrol, safety, scout, submit, runs, vet, radar
 from .config import Config
 from .limiter import DailyLimiter
 from .outcomes import Stats
@@ -113,6 +113,8 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
                 notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
                 for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" and cfg.discovery_sampling == "combined" else
                           discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
+                    if c.verdict.references:
+                        qualification.record(cfg.path("qualification.json"), c)
                     if c.verdict.decision == "approve":
                         issues.append(c)
                         if c.repo not in repos:
