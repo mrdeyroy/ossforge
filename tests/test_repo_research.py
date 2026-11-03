@@ -591,3 +591,29 @@ def test_expired_session_still_allows_source_proposal_without_renewal(adoption, 
     out = repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
     assert out['status'] == 'candidate'
     assert cfg.path('research_session.json').read_bytes() == before
+
+
+@pytest.mark.parametrize('route', ['issue_first', 'unresolved', None])
+def test_proposal_rechecks_route_after_investigation_begin(adoption, monkeypatch, route):
+    cfg, _ = adoption
+    def changed_route(*args):
+        if route in {'issue_first', 'unresolved'}:
+            raise ValueError('publication route ' + route + ': prerequisite unresolved')
+        return route
+    monkeypatch.setattr(repo_research.policy_review, 'publication_route', changed_route)
+    monkeypatch.setattr(repo_research.gh, 'api', lambda *a, **kw: pytest.fail('route hold before issue/commit reads'))
+    with pytest.raises(repo_research.Invalid, match='prerequisite|no coding'):
+        repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    assert not cfg.path('queue.json').exists()
+
+
+def test_source_review_rechecks_changed_route_before_read(source_review, monkeypatch):
+    cfg, sha, _ = source_review
+    before = cfg.path('research_source_review.json').read_bytes()
+    def changed_route(*args):
+        raise ValueError('publication route issue_first: prerequisite unresolved')
+    monkeypatch.setattr(repo_research.policy_review, 'publication_route', changed_route)
+    monkeypatch.setattr(repo_research.gh, 'api', lambda *a, **kw: pytest.fail('no source read after route change'))
+    with pytest.raises(repo_research.Invalid, match='issue_first'):
+        repo_research.review_source(cfg, sha, 'previously unrelated source')
+    assert cfg.path('research_source_review.json').read_bytes() == before
