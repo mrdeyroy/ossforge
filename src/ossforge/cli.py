@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import agent_next, duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
+from . import qualification, agent_next, duplicate_reviews, agent_run, evidence, driver, acceptance, identity, issue_reviews, policy_review
 from . import audit as audit_mod
 from . import admission, discovery, comment, critique, digest, doctor, gh, hunt, loop, patrol, profile, radar, review, safety, scout, submit, vet, verify
 from .config import Config, load
@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
         label={"default": "help wanted"}, limit={"type": int, "default": 20},
         strategy={"choices": ["rotate", "broad", "history", "preferred", "breadth-first"], "default": "rotate"},
         include_recent={"action": "store_true"})
+    qr = add("review-qualification", "refresh deferred issue/PR evidence, never approve or publish", "repo")
+    qr.add_argument("number", type=int)
+    qr.add_argument("--defer", default="", help="pause this local review with a reason; never marks work eligible")
     add("features", "find vetted feature issues", language={}, limit={"type": int, "default": 15})
     ir = add("review-issue", "skip an explicitly reviewed issue until upstream activity changes", "repo")
     ir.add_argument("number", type=int)
@@ -247,6 +250,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{x.repo}: {x.score}/100 {x.recommendation} flags={x.flags}")
         for n in x.notes:
             print("  -", n)
+    elif a.cmd == "review-qualification":
+        try:
+            if a.defer:
+                qualification.defer(cfg.path("qualification.json"), a.repo, a.number, a.defer)
+                emit({"status": "deferred", "warning": "No eligibility or publication authority created"})
+            else:
+                with gh.read_budget(cfg.discovery_read_budget_seconds):
+                    emit(qualification.inspect(a.repo, a.number))
+        except (ValueError, gh.GhError, gh.ReadBudgetExceeded) as exc:
+            print(f"REFUSED: qualification review incomplete: {exc}", file=sys.stderr)
+            return 1
     elif a.cmd == "vet":
         x = vet.vet_issue(a.repo, a.number)
         print(x.issue, x.decision, "; ".join(x.reasons))

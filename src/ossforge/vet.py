@@ -63,6 +63,7 @@ class Verdict:
     issue: str
     decision: str  # "approve" | "skip" | "anti_ai"
     reasons: list[str] = field(default_factory=list)
+    references: list[dict] = field(default_factory=list)
 
 
 def decide(
@@ -138,7 +139,8 @@ def vet_issue(repo: str, number: int, repo_ok: bool = True) -> Verdict:
         return Verdict(f"{repo}#{number}", "skip", [f"referenced PR coverage unavailable; review activity before coding: {exc}"])
     prs = [pr for pr in prs if references.may_reference(pr, repo, number)]
     if any(pr.get("state") != "open" for pr in prs):
-        return Verdict(f"{repo}#{number}", "skip", ["closed or merged PR reference requires review of implementation and current source before coding"])
+        return Verdict(f"{repo}#{number}", "skip", ["closed or merged PR reference requires review of implementation and current source before coding"],
+                       references=[{k: pr.get(k) for k in ("number", "html_url", "state", "updated_at")} for pr in prs])
     files = policy_texts(repo)
     pol = policy.scan_files(files)
     code, reasons = decide(
