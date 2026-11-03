@@ -61,3 +61,14 @@ def test_publication_reference_filter_keeps_timeline_and_local_work(monkeypatch)
     activity.append({'event': 'cross-referenced', 'source': {'issue': {'pull_request': {}}}})
     with pytest.raises(submit.Refused, match='referenced PR'):
         submit._source_work_gate(item)
+
+
+def test_arbitrary_foreign_anchor_label_cannot_hide_independent_local_reference():
+    from ossforge.references import may_reference
+    for body in [
+        '<a href="https://github.com/other/repo/issues/42">local #42 and upstream work</a>',
+        '[Fix local #42](https://github.com/other/repo/issues/42)',
+        '<a href="https://github.com/other/repo/issues/42">#42 and org/repo#42</a>',
+    ]:
+        assert may_reference({'body': body}, 'org/repo', 42)
+    assert not may_reference({'body': "<a href='https://github.com/other/repo/issues/42'>#42</a>"}, 'org/repo', 42)

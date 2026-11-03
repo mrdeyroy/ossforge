@@ -10,7 +10,7 @@ import re
 from urllib.parse import urlsplit
 
 
-_URL = re.compile(r'https?://(?:redirect\.)?github\.com/[^\s<>"\]\)]+', re.I)
+_URL = re.compile(r'''https?://(?:redirect\.)?github\.com/[^\s<>"'\]\)]+''', re.I)
 
 
 def may_reference(pr: dict, repo: str, number: int) -> bool:
@@ -26,6 +26,13 @@ def may_reference(pr: dict, repo: str, number: int) -> bool:
         nonlocal foreign
         url = _URL.search(match.group())
         if url and foreign_url(url.group()):
+            link = match.group()
+            label = (re.sub(r'^<a\b[^>]*>|</a\s*>$', '', link, flags=re.I).strip()
+                     if link.lower().startswith('<a') else link[1:link.index(']')].strip())
+            # A whole arbitrary anchor label can contain a distinct local
+            # reference. Strip only the exact rendered shorthand/foreign URL.
+            if label not in {f"#{number}", url.group()}:
+                return link
             foreign = True
             return ''
         return match.group()
