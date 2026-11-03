@@ -7,6 +7,7 @@ The IDE owns semantic diagnosis. Health and merge samples are not permission.
 from __future__ import annotations
 
 import json
+import uuid
 import hashlib
 import fcntl
 from contextlib import contextmanager
@@ -103,7 +104,7 @@ def prepare(cfg: Config) -> dict:
         data.pop('exhausted', None)
         # Persist identity before potentially slow evidence collection. A partial
         # read is a recoverable research lead, never a completed suitability pass.
-        lead = {'repo': repo, 'status': 'collecting', 'pool': pool,
+        lead = {'repo': repo, 'research_id': uuid.uuid4().hex, 'status': 'collecting', 'pool': pool,
                 'reason': 'source collection incomplete; refresh before assessment'}
         data['lead'] = lead
         _save(cfg, data)
@@ -280,7 +281,7 @@ def begin(cfg: Config) -> dict:
     # empty output is not proof that the repo has no defects. No AI is invoked.
     findings = audit.scan_tree(clone)
     hints = [asdict(f) | {'snippet': hunt.snippet(clone, f.path, f.line, 2)} for f in findings[:8]]
-    data['lead'] = {**lead, 'status': 'investigating', 'clone': str(clone.resolve()),
+    data['lead'] = {**lead, 'research_id': lead.get('research_id') or uuid.uuid4().hex, 'status': 'investigating', 'clone': str(clone.resolve()),
                     'base': tip, 'checkout': snapshot, 'hints': hints,
                     'scan': {'method': 'builtin Python AST candidate scan', 'found': len(findings),
                              'shown': len(hints), 'coverage': 'finite detectors, not semantic bug completeness'},
@@ -399,7 +400,7 @@ def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 
     item = Item(id_, lead['repo'], path, line, 'issue' if source_issue else 'ide-hypothesis', detail.strip(),
                 status='clean', clone=str(root), notes=['IDE source-reviewed hypothesis, not bug proof',
                                                      lead['revision_url']] + ([source['html_url']] if source else []),
-                source_issue=source_issue, snippet=hunt.snippet(root, path, line))
+                source_issue=source_issue, research_id=lead.get('research_id', ''), snippet=hunt.snippet(root, path, line))
     queue.add(item)
     queue.save()
     return {'status': 'candidate', 'id': id_, 'warning': 'must check current issues/PRs/commits and reproduce before editing; submit independently rechecks duplicates'}

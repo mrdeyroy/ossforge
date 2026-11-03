@@ -53,6 +53,15 @@ Do not start a nested model process just because you are already an AI assistant
 >   then return to agent-next and the normal native-check route.
 >   Do not edit state files or treat an issue's age as permission.
 > Follow its structured checkpoint:
+> - contribution_submitted: stop this contribution session. Report the saved
+>   issue/PR links as submission progress, not live status or acceptance. Do not
+>   propose or publish the same work again; reconcile current remote state when
+>   requested or relevant feedback arrives. This does not start PR polling.
+>   Completion requires the saved item's exact originating investigation ID,
+>   investigating status and nonempty matching repo/clone. Old unbound records
+>   are not retroactively treated as completed. STOP, partial reconciliation and
+>   actionable queued work take priority. Other held/qualification work remains
+>   saved but does not restart an already submitted contribution session.
 > - stopped: preserve state and wait for the owner, never clear STOP yourself.
 > - reconcile_remote: inspect current issue, owner fork branch and exact-head PR
 >   state before retrying. A saved URL is not current remote truth. If a prior
@@ -542,3 +551,21 @@ Removing a marker never supplies policy permission. Owner review does not erase 
 origin, waive required disclosure or override source restrictions. Independent fork
 publication is a separate action requiring its own source/target/visibility and owner
 approval checks; it is not implemented by these commands or implied by local success.
+
+### Investigation identity and version compatibility
+
+New repo-first investigations carry a durable `research_id`, copied to proposed
+queue items. A completed-submission checkpoint uses that origin identity, not a
+reused repository checkout path. Legacy records without the identity remain
+unbound: they are preserved but are not retroactively certified as completed.
+Do not backfill their IDs or erase state to obtain a passing checkpoint. Report
+known saved submissions separately. For a new session, retain the old records,
+explicitly defer the finished lead with its actual reason, and start another
+search session only within a newly authorized allowance.
+
+Queue files written by this version contain `research_id`. Older versions whose
+queue parser does not recognize that field refuse to load them. Do not downgrade
+while using the same active state directory or strip fields to bypass that
+refusal. Keep a pre-upgrade backup for rollback, and reconcile any remote effects
+before restoring an older snapshot. A backup may predate a real submission;
+restoring it is not permission to publish again.

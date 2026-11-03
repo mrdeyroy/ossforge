@@ -54,6 +54,32 @@ def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default
     if task["status"] == "ready":
         return result("work_candidate", task=task,
                       next_argv=prefix + ["agent-task", "--item", task["id"]])
+    if cfg.repo_first:
+        try:
+            lead = repo_research.load(cfg)['lead']
+        except repo_research.Invalid as exc:
+            return result('inspect_local', reason=str(exc))
+        completed = [i for i in queue.items.values()
+                     if lead and lead.get('status') == 'investigating'
+                     and lead.get('research_id') and lead.get('clone')
+                     and i.research_id == lead['research_id']
+                     and i.repo == lead['repo'] and i.clone == lead['clone']
+                     and (i.submitted.get('pr_url') or i.submitted.get('pr'))]
+        if completed:
+            try:
+                prep = preparation._load(cfg)
+                preserved = preparation.task(cfg) if prep else None
+            except (ValueError, OSError, evidence.StaleEvidence, identity.IdentityError) as exc:
+                return result('inspect_local', reason=str(exc), warning='preserve local preparation before continuing')
+            return result('contribution_submitted', stop_session=True,
+                          completed=[{'id': i.id, 'repo': i.repo,
+                                      'saved_issue': i.submitted.get('issue_url') or i.submitted.get('issue'),
+                                      'saved_pr': i.submitted.get('pr_url') or i.submitted.get('pr')}
+                                     for i in completed],
+                          preserved_preparation=preserved,
+                          warning='Saved submission progress, not live remote state or maintainer acceptance. '
+                                  'Stop this contribution session; do not propose the same work or publish again. '
+                                  'Other qualification/held work remains unchanged for a separately requested session.')
     # Local actionable work wins; never propose another remote search during a
     # known cooldown or disguise an interrupted read phase as a clean no-find.
     try:

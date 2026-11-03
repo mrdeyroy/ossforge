@@ -241,3 +241,71 @@ def test_earlier_review_and_held_checkpoints_retain_explicit_scope(tmp_path, mon
     out = agent_next.next_step(cfg, queue, 'cfg', 'research')
     assert out['status'] == ('review_needed' if kind == 'review' else 'held_work')
     assert out['continue_argv'][-2:] == ['--scope', 'research']
+
+
+def test_completed_selected_investigation_stops_without_reproposing(tmp_path, monkeypatch):
+    cfg, queue, item = fixture(tmp_path, monkeypatch)
+    cfg.repo_first = True
+    item.status = 'submitted'
+    item.research_id = 'investigation-one'
+    item.submitted = {'issue': 'https://github.com/owner/repo/issues/1',
+                      'pr': 'https://github.com/owner/repo/pull/2'}
+    monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {
+        'lead': {'repo': item.repo, 'clone': item.clone, 'status': 'investigating', 'research_id': 'investigation-one'}})
+    monkeypatch.setattr(agent_next.repo_research, 'checkpoint', lambda *a: pytest.fail('no reproposal route'))
+    monkeypatch.setattr(agent_next.research_session, 'status', lambda *a: pytest.fail('no renewed search'))
+    monkeypatch.setattr(agent_next.submit, '_base', lambda *a: pytest.fail('no remote probe'))
+    out = agent_next.next_step(cfg, queue, 'cfg')
+    assert out['status'] == 'contribution_submitted' and out['stop_session']
+    assert out['completed'][0]['saved_pr'] == item.submitted['pr']
+    assert 'next_argv' not in out
+    assert not queue.path.exists()
+
+
+def test_different_investigation_not_stopped_by_prior_submission(tmp_path, monkeypatch):
+    cfg, queue, item = fixture(tmp_path, monkeypatch)
+    cfg.repo_first = True
+    item.status = 'submitted'
+    item.submitted = {'pr': 'https://github.com/owner/repo/pull/2'}
+    monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {
+        'lead': {'repo': 'other/repo', 'clone': item.clone, 'status': 'investigating'}})
+    monkeypatch.setattr(agent_next.repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
+    assert agent_next.next_step(cfg, queue, 'cfg')['status'] == 'repo_investigation'
+
+
+@pytest.mark.parametrize('change', [
+    {'research_id': 'different'}, {'research_id': ''}, {'clone': ''},
+    {'status': 'repo_review_needed'}])
+def test_same_repo_clone_different_or_unbound_lead_not_completed(tmp_path, monkeypatch, change):
+    cfg, queue, item = fixture(tmp_path, monkeypatch)
+    cfg.repo_first = True
+    item.status = 'submitted'
+    item.research_id = 'one'
+    item.submitted = {'pr': 'https://github.com/owner/repo/pull/2'}
+    lead = {'repo': item.repo, 'clone': item.clone, 'status': 'investigating', 'research_id': 'one'} | change
+    monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': lead})
+    monkeypatch.setattr(agent_next.repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
+    monkeypatch.setattr(agent_next.research_session, 'status', lambda *a: {'status': 'search_session_active'})
+    assert agent_next.next_step(cfg, queue, 'cfg')['status'] == 'repo_investigation'
+
+
+@pytest.mark.parametrize('other', ['review', 'held', 'partial', 'stop'])
+def test_submission_completion_priority_preserves_recovery(tmp_path, monkeypatch, other):
+    cfg, queue, item = fixture(tmp_path, monkeypatch)
+    cfg.repo_first = True
+    item.status = 'submitted'
+    item.research_id = 'one'
+    item.submitted = {'pr': 'https://github.com/owner/repo/pull/2'}
+    monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': {
+        'repo': item.repo, 'clone': item.clone, 'status': 'investigating', 'research_id': 'one'}})
+    if other == 'review':
+        monkeypatch.setattr(agent_next.qualification, 'pending', lambda *a: pytest.fail('completed session wins'))
+    elif other == 'held':
+        queue.add(Item('held', 'other/repo', 'x.py', 1, 'bug', 'candidate', status='held'))
+    elif other == 'partial':
+        queue.add(Item('partial', 'other/repo', 'x.py', 1, 'bug', 'candidate', status='verified', submitted={'issue': 'saved'}))
+    else:
+        Path(cfg.kill_file).touch()
+    assert agent_next.next_step(cfg, queue, 'cfg')['status'] == {
+        'review': 'contribution_submitted', 'held': 'contribution_submitted',
+        'partial': 'reconcile_remote', 'stop': 'stopped'}[other]
