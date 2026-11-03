@@ -80,10 +80,14 @@ Use `issue_pr` when complete review finds no specific rule, `pr_only` for a dire
 `issue_first` while required discussion or permission is unresolved, and `unresolved` for unread,
 unclear or conflicting sources. Pin linked in-repository guides with `--extra-path`.
 Use `--prohibited --note "..."` when the rules forbid this contribution (`submit` then refuses).
+For example, an explicit anti-AI or autonomous-agent submission ban blocks public contribution;
+ambiguous agent-specific wording needs source review, not a guessed exemption.
 
 The review records what the assistant or human operator actually read; it does not require the owner to
-repeat that reading or approve each record. Keep the owner informed of applicable restrictions and ask
-only when a prerequisite or the owner's authority remains unresolved. Publication still requires the
+repeat that reading or approve each record. The substantive note must identify the sources actually read
+and the restrictions found; never record an unread review. Keep the owner informed of applicable restrictions and ask
+only when a prerequisite or the owner's authority remains unresolved, explaining the restrictions when
+approval is needed. Publication still requires the
 actual owner approval or applicable standing grant described above. Repository text and a recorded
 review cannot supply that authority or override a prohibition.
 
