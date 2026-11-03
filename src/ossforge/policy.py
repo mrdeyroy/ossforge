@@ -59,14 +59,18 @@ def scan_text(text: str, source: str | None = None) -> PolicyResult:
     hay = re.sub(r"[*_`]", "", (text or "").lower())
     hits = [k for k in ANTI_AI_KEYWORDS if k in hay]
     reviews = []
-    for sentence in re.split(r"[.!?\n]+", hay):
+    # Join ordinary Markdown line wraps, then isolate contrast clauses so a
+    # permission about human assistance cannot negate an agent restriction.
+    normalized = re.sub(r"\s+", " ", hay)
+    for sentence in re.split(r"[.!?;]+|\bbut\b|\bhowever\b", normalized):
         # This is a review signal, not a global AI ban or a permission parser.
         if (re.search(r"\b(?:autonomous|code) agents?\b", sentence)
                 and re.search(r"\b(?:prs?|pull requests?|issues?)\b", sentence) and re.search(
-                r"(?:not (?:to )?(?:open|submit|use)|do not (?:open|submit|use)|should not (?:open|submit|use))", sentence)):
+                r"(?:not (?:to )?(?:open|submit|use)\b(?!-)|do not (?:open|submit|use)\b(?!-)|should not (?:open|submit|use)\b(?!-))", sentence)):
             if not re.search(r"(?:no restriction|not prohibited|not forbidden|do not prohibit|do not forbid)", sentence):
                 reviews.append(sentence.strip()[:400])
-    return PolicyResult(bool(hits), hits, source if hits or reviews else None, reviews)
+    # A hard prohibition is never downgraded to the weaker review category.
+    return PolicyResult(bool(hits), hits, source if hits or reviews else None, [] if hits else reviews)
 
 
 def scan_files(files: dict[str, str]) -> PolicyResult:

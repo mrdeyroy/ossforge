@@ -111,3 +111,33 @@ We understand that code agents are extremely powerful tools, and many people at 
     assert len(result.agent_review) == 2 and not result.anti_ai
     assert any('first-time' in r for r in result.agent_review)
     assert any('for the moment' in r for r in result.agent_review)
+
+
+def test_hard_ban_and_review_in_same_document_stays_hard_ban():
+    result = policy.scan_files({'CONTRIBUTING.md': 'Human-authored only. Autonomous agents should not submit issues.'})
+    assert result.anti_ai and not result.agent_review
+
+
+def test_permission_in_separate_contrast_clause_does_not_suppress_restriction():
+    result = policy.scan_text('We do not forbid human AI assistance, but autonomous agents should not submit PRs.')
+    assert result.agent_review and not result.anti_ai
+
+
+def test_markdown_line_wrap_preserves_agent_restriction():
+    result = policy.scan_text('Autonomous agents should not\nsubmit PRs or issues.')
+    assert result.agent_review and not result.anti_ai
+
+
+def test_open_source_code_advice_is_not_publication_restriction():
+    result = policy.scan_text('Autonomous agents should not open-source code without fixing all reported issues.')
+    assert not result.agent_review and not result.anti_ai
+
+
+def test_hunt_prioritizes_hard_ban_even_for_mixed_result(monkeypatch, tmp_path):
+    from ossforge import hunt
+    from ossforge.config import Config
+    monkeypatch.setattr(hunt, 'clone', lambda *a: tmp_path)
+    monkeypatch.setattr(hunt, 'policy_of', lambda *a: policy.PolicyResult(True, ['human-authored only'],
+                                                                        'CONTRIBUTING.md', ['review']))
+    result = hunt.hunt(Config(), 'org/repo', None, None)
+    assert result['anti_ai'] == 'CONTRIBUTING.md' and not result.get('policy_review_needed')

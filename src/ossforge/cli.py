@@ -312,11 +312,11 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "audit":
         dest = hunt.clone(cfg, a.repo)
         pol = hunt.policy_of(dest)
-        if pol.agent_review:
-            print(f"SKIP {a.repo}: agent contribution policy needs review in {pol.source}. No findings produced.")
-            return 0
         if pol.anti_ai:
             print(f"SKIP {a.repo}: anti-AI policy in {pol.source}. No findings produced.")
+            return 0
+        if pol.agent_review:
+            print(f"SKIP {a.repo}: agent contribution policy needs review in {pol.source}. No findings produced.")
             return 0
         for f in sorted(audit_mod.scan_tree(dest), key=lambda x: (x.severity, x.path, x.line)):
             print(f"  [{f.severity}] {f.path}:{f.line} {f.kind}: {f.detail}")

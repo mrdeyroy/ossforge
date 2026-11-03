@@ -238,10 +238,10 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
     _source_work_gate(it)
     files = _policy_files(it.repo)
     pol = policy.scan_files(files)
-    if pol.agent_review:
-        raise Refused(f"agent contribution policy needs review in {pol.source}; no automated clearance from prose")
     if pol.anti_ai:
         raise Refused(f"anti-AI policy in {pol.source}")
+    if pol.agent_review:
+        raise Refused(f"agent contribution policy needs review in {pol.source}; no automated clearance from prose")
     why = policy_review.check(cfg, it.repo)
     if why:
         raise Refused(why)
