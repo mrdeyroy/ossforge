@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     rr = add("research-repo", "select and collect a durable repo-first research lead without issue search")
     rr.add_argument("--refresh", action="store_true")
     rr.add_argument("--begin", action="store_true")
+    rr.add_argument("--review-native-source", default=None, metavar="PATH")
+    rr.add_argument("--native-note", default="")
+    rr.add_argument("--native-guide", default="", metavar="PATH")
+    rr.add_argument("--native-test-command", nargs="+", default=[])
     rr.add_argument("--next-window", action="store_true", help="explicitly continue exhausted-window search without extending session budget")
     rp = add("research-propose", "record an IDE source-reviewed hypothesis in the selected clean checkout", "path")
     rp.add_argument("line", type=int)
@@ -179,9 +183,14 @@ def main(argv: list[str] | None = None) -> int:
                 elif a.cmd == "research-propose":
                     result = repo_research.propose(cfg, a.path, int(a.line), a.detail, a.source_issue)
                 else:
-                    if sum(bool(v) for v in (a.defer, a.refresh, a.begin, a.next_window)) > 1:
+                    if sum(bool(v) for v in (a.defer, a.refresh, a.begin, a.next_window, a.review_native_source is not None)) > 1:
                         raise repo_research.Invalid('choose only one research-repo action')
-                    result = (repo_research.next_window(cfg) if a.next_window else
+                    if a.review_native_source is not None and not a.review_native_source.strip():
+                        raise repo_research.Invalid("--review-native-source cannot be empty")
+                    if (a.native_guide or a.native_test_command or a.native_note) and a.review_native_source is None:
+                        raise repo_research.Invalid("native guide/command requires --review-native-source")
+                    result = (repo_research.review_native(cfg, a.review_native_source, a.native_guide, a.native_test_command, a.native_note) if a.review_native_source is not None else
+                              repo_research.next_window(cfg) if a.next_window else
                               repo_research.defer(cfg, a.defer) if a.defer else
                               repo_research.begin(cfg) if a.begin else
                               repo_research.refresh(cfg) if a.refresh else repo_research.prepare(cfg))

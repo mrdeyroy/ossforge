@@ -14,11 +14,12 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from pathlib import Path
+from urllib.parse import quote
 
 from . import acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit, vet
 from .queue import Item, Queue, item_id
 from .config import Config
-from . import research_session
+from . import research_session, repo_suitability
 
 
 class Invalid(ValueError):
@@ -141,6 +142,7 @@ def refresh(cfg: Config) -> dict:
         tip = gh.api(f'repos/{repo}/commits/{branch}', fresh=True)
         if not tip.get('sha') or not tip.get('html_url'):
             raise Invalid('default branch revision unavailable; preserve lead')
+        suitability = repo_suitability.assess(repo, tip['sha'], snapshot)
     reasons = []
     if restriction:
         reasons.append(restriction)
@@ -153,7 +155,7 @@ def refresh(cfg: Config) -> dict:
     result = {**lead, 'status': 'repo_review_needed', 'url': info['html_url'],
               'default_branch': branch, 'revision': tip['sha'], 'revision_url': tip['html_url'],
               'health': asdict(health), 'outside_contributions': asdict(outside),
-              'policy': snapshot, 'holds': reasons,
+              'policy': snapshot, 'code_suitability': suitability, 'holds': reasons,
               'requirements': ['read full policy documents and linked contribution guides',
                                'merge samples and stars are not permission or bug proof',
                                'check feasibility of native reproduction before selecting work',
@@ -181,6 +183,49 @@ def defer(cfg: Config, reason: str) -> dict:
     return {'status': 'deferred', 'reason': reason, 'cursor': data['cursor']}
 
 
+def review_native(cfg: Config, source_path: str, guide_path: str, command: list[str], note: str = "") -> dict:
+    """Source-backed feasibility review for nonstandard layouts, not a test pass."""
+    safety.kill_switch(cfg)
+    paths = (source_path, guide_path)
+    for path in paths:
+        if (not path or path != path.strip() or path.startswith('/') or
+                any(p in ('', '.', '..') for p in path.split('/')) or
+                any(c in path for c in '*?#[\\%') or any(ord(c) < 32 for c in path)):
+            raise Invalid('native review paths must be exact files inside the selected repository')
+    if source_path == guide_path:
+        raise Invalid('cite separate implementation source and native test instructions')
+    if Path(source_path).suffix.lower() not in {'.py', '.rs', '.go', '.js', '.ts', '.c', '.h', '.cpp', '.java', '.rb', '.cs', '.sh'}:
+        raise Invalid('implementation citation needs a code-file path, not another documentation file; this is not semantic proof')
+    if not note.strip() or len(note) > 2000:
+        raise Invalid('describe the cited implementation, native test route and remaining feasibility uncertainty')
+    if not command or any(not v or '\x00' in v for v in command):
+        raise Invalid('a concrete native test command argv is required')
+    lead = refresh(cfg)
+    sources = []
+    with gh.read_budget(research_session.allowance(cfg) if cfg.repo_first else cfg.discovery_read_budget_seconds):
+        for path in paths:
+            content = gh.api(f"repos/{lead['repo']}/contents/{quote(path, safe='/')}", ref=lead['revision'], fresh=True)
+            if (not isinstance(content, dict) or content.get('type') != 'file' or
+                    content.get('encoding') != 'base64' or
+                    not content.get('sha') or not content.get('html_url')):
+                raise Invalid('native review must cite readable source and test-guide files')
+            import base64
+            try:
+                text = base64.b64decode(content.get('content', ''), validate=False).decode('utf-8')
+            except (ValueError, UnicodeError) as exc:
+                raise Invalid('native citation is not readable text') from exc
+            if not text or len(text) > 200000:
+                raise Invalid('native review file unavailable or too large for bounded review')
+            sources.append({'path': path, 'sha': content['sha'], 'url': content['html_url']})
+    data = load(cfg)
+    data['lead']['native_review'] = {'revision': lead['revision'], 'sources': sources,
+                                    'test_command': command, 'note': note.strip(),
+                                    'suitability_status': lead['code_suitability']['status'],
+                                    'warning': 'source-qualified review assertion; semantic feasibility uncertain, not proof tests ran or permission'}
+    _save(cfg, data)
+    return data['lead']['native_review']
+
+
 def begin(cfg: Config) -> dict:
     """Policy-reviewed, source-pinned clean checkout for IDE investigation.
 
@@ -189,6 +234,13 @@ def begin(cfg: Config) -> dict:
     lead = refresh(cfg)
     if lead['holds']:
         raise Invalid('; '.join(lead['holds']))
+    review = lead.get('native_review', {})
+    reviewed = (review.get('revision') == lead['revision'] and bool(review.get('note'))
+                and bool(review.get('test_command')) and len(review.get('sources', [])) == 2
+                and all(s.get('sha') and s.get('url') for s in review.get('sources', []))
+                and review.get('suitability_status') == lead['code_suitability']['status'])
+    if lead['code_suitability']['status'] != 'native_candidate' and not reviewed:
+        raise Invalid('native code suitability unresolved: ' + lead['code_suitability']['reason'])
     why = policy_review.check(cfg, lead['repo'], lead['policy'])
     if why:
         raise Invalid(why)

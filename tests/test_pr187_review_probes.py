@@ -6,6 +6,7 @@ from ossforge.queue import Queue, Item, item_id
 
 
 def setup_sources(monkeypatch):
+    monkeypatch.setattr(repo_research.repo_suitability, 'assess', lambda *a: {'status': 'native_candidate'})
     monkeypatch.setattr(repo_research.discovery, 'discover_broad_repos', lambda *a: ['org/one', 'org/two'])
     monkeypatch.setattr(repo_research.repo_access, 'pr_restriction', lambda *a: '')
     monkeypatch.setattr(repo_research.radar, 'analyze', lambda r: radar.RepoScore(r, 80, 'Go'))
