@@ -80,3 +80,24 @@ def test_read_status_available_under_stop(tmp_path, capsys, args):
     assert cli.main(['--config', str(cfg), *args]) == 0
     assert 'kill switch' not in capsys.readouterr().err
     assert stop.exists()
+
+
+@pytest.mark.parametrize('scope', ['default', 'research'])
+def test_stopped_payload_preserves_scope_and_contract_before_ctx(tmp_path, monkeypatch, capsys, scope):
+    import json
+    state = tmp_path / 'state'
+    state.mkdir()
+    (state / 'queue.json').write_text('{broken')
+    stop = tmp_path / 'STOP'
+    stop.touch()
+    cfg = tmp_path / 'config.yaml'
+    cfg.write_text(f'state_dir: {state}\nkill_file: {stop}\nrepo_first: true\n')
+    monkeypatch.setattr(cli, '_ctx', lambda *a: pytest.fail('no state load under STOP'))
+    assert cli.main(['--config', str(cfg), 'agent-next', '--scope', scope]) == 0
+    out = json.loads(capsys.readouterr().out)
+    expected = ['ossforge', '--config', str(cfg), 'agent-next']
+    if scope == 'research':
+        expected += ['--scope', 'research']
+    assert out['continue_argv'] == expected and out['status'] == 'stopped'
+    assert 'owner authorization' in out['publication'] and out['local_only']
+    assert (state / 'queue.json').read_text() == '{broken' and stop.exists()

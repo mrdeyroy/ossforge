@@ -191,7 +191,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"REFUSED: {exc}", file=sys.stderr)
             return 1
     if a.cmd == 'agent-next' and Path(cfg.kill_file).exists():
+        continuation = ['ossforge', '--config', a.config, 'agent-next']
+        if a.scope == 'research':
+            continuation += ['--scope', 'research']
         print(json.dumps({'schema': 1, 'status': 'stopped', 'local_only': True,
+                          'continue_argv': continuation,
+                          'publication': 'requires owner authorization; never inferred from this checkpoint',
                           'reason': 'kill switch is set; preserve state and wait for the owner'}))
         return 0
     try:
