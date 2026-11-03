@@ -30,7 +30,9 @@ Do not start a nested model process just because you are already an AI assistant
 > config. This staged route includes a session search-budget controller and
 > freshly vetted existing-issue adoption. Do not claim the whole workflow is
 > proven from repository selection alone.
-> Run `ossforge --config ossforge.yaml agent-next` after startup and each step.
+> Run `ossforge --config ossforge.yaml agent-next` at startup. After each step,
+> use the returned `continue_argv` checkpoint command so an explicitly selected
+> research view stays selected; do not silently fall back to the default view.
 > - repo_research: follow the repo-first investigation section below. Read the
 >   collected suitability/policy evidence and linked rules. Record the ordinary
 >   source-backed review, then use the supplied --begin command only when the
@@ -99,6 +101,18 @@ becomes permission to publish. Its default checkpoint now includes an explicit
 that read-only view to continue an independent investigation while retaining the
 completed preparation's review link and publication hold. It does not discard or
 alter the terminal journal, start a search, extend a search budget or clear a hold.
+Every scoped checkpoint returns `continue_argv` with the same explicit scope.
+Use that command after each research step, including qualification or held-work
+review. Those earlier checkpoints keep their priority and independent commands;
+the view does not clear them. Research scope requires `repo_first: true`; the
+issue-only mode refuses it rather than silently changing its meaning.
+
+This selects a view, not a second local-preparation slot. If another restricted
+repository would require local-only preparation, `research-repo --begin` still
+refuses while the prior journal exists. Keep that work deferred or ask the owner
+how to handle it; do not erase the preserved journal. Ordinary permitted public
+investigation uses its separate checkout and can continue.
+
 An active preparation, invalid receipt, STOP, partial publication, queued candidate
 or current verified work still takes its normal priority. Without an active
 investigation, an exhausted search session remains exhausted.

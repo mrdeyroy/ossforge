@@ -18,9 +18,12 @@ from .queue import Queue
 def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default') -> dict:
     if scope not in {'default', 'research'}:
         raise ValueError('unsupported checkpoint scope')
+    if scope == 'research' and not cfg.repo_first:
+        raise ValueError('research checkpoint scope requires repo_first: true')
     prefix = ["ossforge", "--config", config_path]
+    continuation = prefix + ['agent-next'] + (['--scope', 'research'] if scope == 'research' else [])
     def result(status, **kw):
-        return {"schema": 1, "status": status, "local_only": True,
+        return {"schema": 1, "status": status, "local_only": True, "continue_argv": continuation,
                 "publication": "requires owner authorization; never inferred from this checkpoint", **kw}
     if Path(cfg.kill_file).exists():
         return result("stopped", reason="kill switch is set; do not resume without the owner's instruction")
@@ -124,6 +127,7 @@ def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default
                                   next_argv=prefix + ['research-session'],
                                   warning='choose an explicit search budget; resume never extends it, exhausted search is not proof of no opportunity')
             checkpoint = repo_research.checkpoint(cfg, prefix)
+            checkpoint['continue_argv'] = continuation
             if preserved_preparation:
                 checkpoint['preserved_preparation'] = preserved_preparation
             return checkpoint
