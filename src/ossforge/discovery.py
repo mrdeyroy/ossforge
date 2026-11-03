@@ -6,10 +6,12 @@ The existing scout gates remain authoritative for every fetched issue.
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 import time
 from dataclasses import dataclass
 
-from . import gh, issue_reviews, scout
+from . import discovery_resume, gh, issue_reviews, scout
 from .config import Config
 from .outcomes import Stats
 
@@ -92,10 +94,15 @@ def recent_reason(data: dict, repo: str, number: int, updated_at: str | None,
 def discover(cfg: Config, stats: Stats, language: str | None = None, label: str = "help wanted",
              limit: int = 20, strategy: str = "rotate", include_recent: bool = False,
              skip_repos: set[str] | None = None) -> list[scout.Candidate]:
+    if cfg.discovery_sampling not in {"combined", "per-repo"}:
+        raise ValueError("discovery_sampling must be combined or per-repo")
     state_path = cfg.path("discovery.json")
     state = issue_reviews.load(state_path)
     cursor_key = "breadth_cursor" if strategy == "breadth-first" else "cursor"
-    cursor = state.get(cursor_key, 0)
+    source_cursor_key = cursor_key
+    if cfg.discovery_sampling == "per-repo":
+        cursor_key = "scoped_" + cursor_key
+    cursor = state.get(cursor_key, state.get(source_cursor_key, 0))
     cursor = cursor if isinstance(cursor, int) and cursor >= 0 else 0
     selected = plan(cfg, stats, language, label, strategy, cursor)
     recent = state.get("recent", {})
@@ -119,6 +126,33 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
         scout.LAST_FUNNEL.clear()
         scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0, stopped=f"GitHub read deadline or rate limit while searching ({e}); nothing was fetched")
         return []
+    pool = list(selected.repos)
+    sample_index = 0
+    sample_key = ""
+    if cfg.discovery_sampling == "per-repo":
+        if not pool:
+            scout.LAST_FUNNEL.clear()
+            scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0,
+                                    stopped="per-repo sampling requires a confirmed repository pool; no unscoped fallback")
+            return []
+        sample_key = hashlib.sha256(json.dumps([strategy, cursor, language, label, limit, pool]).encode()).hexdigest()
+        saved_sample = state.get("scoped_sample", {})
+        if isinstance(saved_sample, dict) and saved_sample.get("key") == sample_key:
+            value = saved_sample.get("index", 0)
+            sample_index = value if type(value) is int and 0 <= value < len(pool) else 0
+        selected.repos = [pool[sample_index]]
+        selected.query = scout.build_query(language, label, cfg.min_stars) + " repo:" + selected.repos[0]
+    # Do not abandon another scope's unfinished batch by changing sampling mode.
+    # Finish that public run with its original config before switching the experiment.
+    pending_batches = discovery_resume._active(cfg.path("discovery-resume.json"))
+    active_key = discovery_resume._key(selected.query, limit)
+    if cfg.discovery_sampling == "per-repo" and any(
+            key != active_key and isinstance(value, dict) and value.get("remaining")
+            for key, value in pending_batches.items()):
+        scout.LAST_FUNNEL.clear()
+        scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0,
+                                stopped="unfinished discovery scope exists; finish it with its original config before per-repo sampling")
+        return []
     if selected.strategy != "broad" and not selected.repos:
         scout.LAST_FUNNEL.clear()
         scout.LAST_FUNNEL.update(fetched=0, kept=0, approved=0, stopped="")
@@ -135,8 +169,13 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
         for c in result:
             if c.verdict.decision == "approve":
                 recent[f"{c.repo.lower()}#{c.number}"] = {"updated_at": c.updated_at, "seen_at": now}
-        issue_reviews._save(state_path, {**state, cursor_key: cursor + 1, "recent": recent})
+        advance = cfg.discovery_sampling != "per-repo" or sample_index + 1 >= len(pool)
+        update = {**state, cursor_key: cursor + int(advance), "recent": recent}
+        if cfg.discovery_sampling == "per-repo":
+            update["scoped_sample"] = {"key": sample_key, "index": 0 if advance else sample_index + 1}
+        issue_reviews._save(state_path, update)
     for c in result:
         c.why.append(f"discovery source: {selected.strategy}")
-    scout.LAST_FUNNEL.update(strategy=selected.strategy, query=selected.query, repos=selected.repos)
+    scout.LAST_FUNNEL.update(strategy=selected.strategy, query=selected.query, repos=selected.repos,
+                            sampling=cfg.discovery_sampling, sample_index=sample_index, repository_pool=pool)
     return result

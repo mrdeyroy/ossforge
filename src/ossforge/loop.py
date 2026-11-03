@@ -107,7 +107,7 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
                 # one label per pass (rotating) keeps the request burst small; features alternate days
                 label = cfg.labels[day % len(cfg.labels)]
                 notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
-                for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" else
+                for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" and cfg.discovery_sampling == "combined" else
                           discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
                     if c.verdict.decision == "approve":
                         issues.append(c)
