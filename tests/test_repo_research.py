@@ -2,6 +2,7 @@ import pytest
 from ossforge import duplicate_reviews, repo_research, agent_next, radar, acceptance, research_session
 from ossforge.config import Config
 from ossforge.queue import Queue
+from ossforge.policy_review import check as real_policy_check, publication_route as real_publication_route
 
 
 def prepare(cfg):
@@ -617,3 +618,30 @@ def test_source_review_rechecks_changed_route_before_read(source_review, monkeyp
     with pytest.raises(repo_research.Invalid, match='issue_first'):
         repo_research.review_source(cfg, sha, 'previously unrelated source')
     assert cfg.path('research_source_review.json').read_bytes() == before
+
+
+@pytest.mark.parametrize('route', ['issue_first', 'unresolved'])
+@pytest.mark.parametrize('action', ['propose', 'review'])
+def test_real_pinned_review_route_transition_blocks_coding(source_review, monkeypatch, route, action):
+    cfg, sha, _ = source_review
+    from ossforge import policy_review
+    # Exercise the actual persisted-review implementation, not the adoption
+    # fixture's stub. The source snapshot is controlled and keeps identical SHA.
+    snapshot = {'repo': 'org/one', 'docs': [{'path': 'CONTRIBUTING.md',
+                'url': 'https://example.invalid/CONTRIBUTING.md', 'sha': 'unchanged-policy'}],
+                'scanned_locations': ['CONTRIBUTING.md']}
+    monkeypatch.setattr(policy_review, 'check', real_policy_check)
+    monkeypatch.setattr(policy_review, 'publication_route', real_publication_route)
+    monkeypatch.setattr(policy_review, 'snapshot', lambda *a, **kw: snapshot)
+    policy_review.record(cfg, 'org/one', snapshot, 'source-reviewed normal route', publication_route='issue_pr')
+    assert policy_review.publication_route(cfg, 'org/one') == 'issue_pr'
+    policy_review.record(cfg, 'org/one', snapshot, 'source-reviewed discussion prerequisite', publication_route=route)
+    before = {p.name: p.read_bytes() for p in cfg.path('.').glob('*.json')}
+    monkeypatch.setattr(repo_research.gh, 'api', lambda *a, **kw: pytest.fail('no issue/commit read'))
+    with pytest.raises(repo_research.Invalid, match=route):
+        if action == 'propose':
+            repo_research.propose(cfg, 'source.py', 1, 'optional README 404 hypothesis')
+        else:
+            repo_research.review_source(cfg, sha, 'inspected unrelated source')
+    assert {p.name: p.read_bytes() for p in cfg.path('.').glob('*.json')} == before
+    assert not cfg.path('queue.json').exists()
