@@ -27,9 +27,9 @@ Do not start a nested model process just because you are already an AI assistant
 > not hold. A rule change requires rereading, not changing the owner's authority.
 >
 > For repository-first code investigation, use `repo_first: true` in the chosen
-> config. This staged route does not yet implement automatic eligible-existing-
-> issue adoption or a session search-budget controller; do not claim the whole
-> workflow is proven from repository selection alone.
+> config. This staged route includes a session search-budget controller, but
+> not eligible-existing-issue adoption yet; do not claim the whole workflow is
+> proven from repository selection alone.
 > Run `ossforge --config ossforge.yaml agent-next` after startup and each step.
 > - repo_research: follow the repo-first investigation section below. Read the
 >   collected suitability/policy evidence and linked rules. Record the ordinary
@@ -38,6 +38,9 @@ Do not start a nested model process just because you are already an AI assistant
 >   to another selected repo within the session's approved search budget.
 > - search_session_needed: ask the owner for the session search allowance if it
 >   was not supplied, then run research-session --seconds SECONDS.
+> - repo_pool_exhausted: this is the current bounded window, not all GitHub.
+>   Follow the supplied research-repo --next-window only within the same active
+>   session budget; do not repeat plain searches or clear deferred history.
 > - search_budget_exhausted: stop new repository search. Summarize what was
 >   checked; do not extend or restart the budget silently. Existing source
 >   investigation/native verification can continue without new repository search.
