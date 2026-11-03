@@ -555,3 +555,11 @@ schedule versus 24 with alternating history turns. That measures planned
 repository coverage only, not available bugs, current health, successful patches
 or accepted contributions. Compare actual query/candidate/repeat counts and
 qualified work before adopting this mode for a longer run.
+
+Agent-specific contribution restrictions (including conditional first-time restrictions) can
+produce a separate "agent contribution policy needs review" hold. This is not an all-AI ban
+and a missing signal is not permission. Read the full, current policy documents, including
+conflicting sections and any human-assistance allowance, with `ossforge policy-review OWNER/REPO`.
+The hold does not accept a prose override or an authorship attestation; publication still
+requires the existing source-pinned policy review and all other gates. Choose other work
+while a restriction remains unresolved. Literal matching is conservative and incomplete.

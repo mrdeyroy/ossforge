@@ -72,6 +72,8 @@ def hunt(cfg: Config, repo: str, q: Queue, stats: Stats, work: str = "fix") -> d
     pol = policy_of(dest)
     if pol.anti_ai:
         return {"repo": repo, "anti_ai": pol.source, "clean": 0, "duplicate": 0}
+    if pol.agent_review:
+        return {"repo": repo, "policy_review_needed": pol.source, "clean": 0, "duplicate": 0}
     found = audit_mod.scan_tree(dest) + external.ruff_findings(dest) + external.js_findings(dest)
     uniq = {(f.path, f.line, f.kind): f for f in found}
     ranked = rank(list(uniq.values()), stats)[:TOP_PER_REPO * 3]

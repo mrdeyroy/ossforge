@@ -155,6 +155,14 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
             q.save()
             notes.append(f"issue work {repo}: skipped (anti-AI in {pol.source})")
             continue
+        if pol.agent_review:
+            for c in (item for item in issues if item.repo == repo):
+                item = q.items[f"{c.repo}#{c.number}:issue"]
+                if item.status == "found" and not item.clone:
+                    q.set(item.id, status="held", hold_reason=f"agent contribution policy needs review in {pol.source}")
+            q.save()
+            notes.append(f"issue work {repo}: policy review needed in {pol.source}; no coding handoff")
+            continue
         for c in (item for item in issues if item.repo == repo):
             # Search/vet approval is only a work lead, not verified correctness.
             item = q.items[f"{c.repo}#{c.number}:issue"]
@@ -167,6 +175,9 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
         pol = hunt.policy_of(clone)
         if pol.anti_ai:
             notes.append(f"feature {c.repo}#{c.number}: skipped (anti-AI in {pol.source})")
+            continue
+        if pol.agent_review:
+            notes.append(f"feature {c.repo}#{c.number}: agent policy review needed in {pol.source}; no coding handoff")
             continue
         it = Item(f"{c.repo}#{c.number}:feature", c.repo, "", c.number, "feature", c.title,
                   status="clean", work="feature", clone=str(clone), source_issue=c.number, rank=c.score, notes=[c.url])

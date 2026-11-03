@@ -203,6 +203,10 @@ def main(argv: list[str] | None = None) -> int:
             print("recorded:", json.dumps({k: v for k, v in rec.items() if k != "docs"}), f"{len(rec['docs'])} doc(s) pinned")
         else:
             print(f"{a.repo}: {len(snap['docs'])} policy-bearing doc(s) found in the scanned locations; anti-AI wording: {snap['anti_ai']}")
+            if snap.get("agent_review"):
+                print("Agent contribution policy needs review; this is not a blanket AI ban or automated permission:")
+                for excerpt in snap["agent_review"]:
+                    print(f"  {excerpt}")
             for d in snap["docs"]:
                 print(f"\n== {d['path']}  {d['url']}  blob {d['sha'][:10]}\n{d['text'][:1500]}")
             print("\nThe scan reads fixed locations only. Also read the project's contribution/AI pages yourself.")
@@ -311,12 +315,18 @@ def main(argv: list[str] | None = None) -> int:
         if pol.anti_ai:
             print(f"SKIP {a.repo}: anti-AI policy in {pol.source}. No findings produced.")
             return 0
+        if pol.agent_review:
+            print(f"SKIP {a.repo}: agent contribution policy needs review in {pol.source}. No findings produced.")
+            return 0
         for f in sorted(audit_mod.scan_tree(dest), key=lambda x: (x.severity, x.path, x.line)):
             print(f"  [{f.severity}] {f.path}:{f.line} {f.kind}: {f.detail}")
     elif a.cmd == "hunt":
         r = hunt.hunt(cfg, a.repo, q, stats)
-        print(f"SKIP {a.repo}: anti-AI policy in {r['anti_ai']}" if r["anti_ai"]
-              else f"{a.repo}: {r['clean']} clean (need verification), {r['duplicate']} duplicate")
+        if r.get("policy_review_needed"):
+            print(f"SKIP {a.repo}: agent contribution policy needs review in {r['policy_review_needed']}. No findings produced.")
+        else:
+            print(f"SKIP {a.repo}: anti-AI policy in {r['anti_ai']}" if r["anti_ai"]
+                  else f"{a.repo}: {r['clean']} clean (need verification), {r['duplicate']} duplicate")
     elif a.cmd == "agent-run":
         try:
             result = agent_run.run(cfg, shlex.split(a.command), timeout=a.timeout, attempts=a.daily_attempts,
