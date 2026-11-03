@@ -78,6 +78,8 @@ def prepare(cfg: Config) -> dict:
     """One bounded repository selection and source collection, no issue query."""
     safety.kill_switch(cfg)
     data = load(cfg)
+    if not data['lead'] and data.get('exhausted', {}).get('scope') == _selection_scope(cfg):
+        return data['exhausted']
     if data['lead'] is not None:
         return data['lead']  # explicit refresh/defer, never silently replace a lead
     if len(cfg.languages) != 1:
@@ -286,7 +288,8 @@ def propose(cfg: Config, path: str, line: int, detail: str) -> dict:
 def checkpoint(cfg: Config, prefix: list[str]) -> dict:
     data = load(cfg)
     if not data['lead'] and data.get('exhausted', {}).get('scope') == _selection_scope(cfg):
-        return {'schema': 1, 'local_only': True, **data['exhausted']}
+        return {'schema': 1, 'local_only': True, **data['exhausted'],
+                'next_argv': prefix + ['research-repo', '--next-window']}
     if data['lead']:
         # Checkpoint is routing context, not a repeated dump of all documents.
         lead = dict(data['lead'])

@@ -125,3 +125,21 @@ def test_next_window_retains_deadline_and_rejections(tmp_path, monkeypatch):
     with pytest.raises(session.Invalid, match='exhausted'):
         repo_research.next_window(cfg)
     assert repo_research.load(cfg)['window'] == 1
+
+
+def test_exhaustion_short_circuits_plain_prepare_despite_search_churn(tmp_path, monkeypatch):
+    from ossforge import repo_research, agent_next
+    from ossforge.queue import Queue
+    cfg = Config(state_dir=str(tmp_path), repo_first=True, kill_file=str(tmp_path/'STOP'))
+    monkeypatch.setattr(session.time, 'time', lambda: 1000.)
+    session.start(cfg, 60)
+    exhausted = {'status': 'repo_pool_exhausted', 'scope': repo_research._selection_scope(cfg),
+                 'pool': ['org/old'], 'reason': 'current bounded window only'}
+    repo_research._save(cfg, {'schema': 1, 'cursor': 1, 'lead': None, 'exhausted': exhausted})
+    monkeypatch.setattr(repo_research.discovery, 'discover_broad_repos',
+                        lambda *a: (_ for _ in ()).throw(AssertionError('repeated query')))
+    assert repo_research.prepare(cfg) == exhausted
+    assert repo_research.prepare(cfg) == exhausted
+    step = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'chosen.yml')
+    assert step['status'] == 'repo_pool_exhausted'
+    assert step['next_argv'] == ['ossforge', '--config', 'chosen.yml', 'research-repo', '--next-window']

@@ -367,7 +367,9 @@ The issue-only compatibility route remains available with `repo_first: false`.
 Start the session explicitly: `research-session --seconds 3600` is a one-hour
 example, not a mandatory timeout. Elapsed wall time includes interruptions.
 `research-session` reads status and does not reset its deadline. Config changes
-that affect selection or identity stop resume for inspection. An expired session
+that affect selection or identity stop resume for inspection. Restore the original
+config to resume, or explicitly start a new session after expiry; never silently
+reset the budget to escape configuration drift. An expired session
 needs `research-session --new --seconds SECONDS` to start another, preserving the
 previous record in history. The IDE must not silently renew a user's allowance.
 Local source investigation and native verification are separate from repository
