@@ -32,7 +32,7 @@ def snapshot(repo: str, extra_paths: list[str] | None = None) -> dict:
         text = base64.b64decode(d["content"]).decode("utf-8", "replace")
         docs.append({"path": p, "url": d["html_url"], "sha": d["sha"], "text": text})
     sc = policy.scan_files({d["path"]: d["text"] for d in docs})
-    return {"repo": repo, "docs": docs, "scanned_locations": list(policy.POLICY_FILES), "anti_ai": sc.anti_ai,
+    return {"repo": repo, "docs": docs, "scanned_locations": list(policy.POLICY_FILES), "anti_ai": sc.anti_ai, "agent_review": sc.agent_review,
             "extra_paths": extra_paths, "ai_policy_docs": policy.ai_policy_docs({d["path"]: d["text"] for d in docs})}
 
 

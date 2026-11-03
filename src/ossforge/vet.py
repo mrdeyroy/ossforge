@@ -81,6 +81,8 @@ def decide(
     if anti_ai.anti_ai:
         return "anti_ai", [f"anti-AI policy in {anti_ai.source}: {', '.join(anti_ai.matched[:2])}"]
     skip = []
+    if anti_ai.agent_review:
+        skip.append(f"agent contribution policy needs review in {anti_ai.source}: {anti_ai.agent_review[0]}")
     if assigned:
         skip.append("assigned")
     if claimed:

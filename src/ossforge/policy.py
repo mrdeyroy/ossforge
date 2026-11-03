@@ -51,23 +51,38 @@ class PolicyResult:
     anti_ai: bool
     matched: list[str] = field(default_factory=list)
     source: str | None = None
+    agent_review: list[str] = field(default_factory=list)
 
 
 def scan_text(text: str, source: str | None = None) -> PolicyResult:
     # Markdown emphasis must not hide literal prohibitions such as **no**.
     hay = re.sub(r"[*_`]", "", (text or "").lower())
     hits = [k for k in ANTI_AI_KEYWORDS if k in hay]
-    return PolicyResult(bool(hits), hits, source if hits else None)
+    reviews = []
+    for sentence in re.split(r"[.!?\n]+", hay):
+        # This is a review signal, not a global AI ban or a permission parser.
+        if (re.search(r"\b(?:autonomous|code) agents?\b", sentence)
+                and re.search(r"\b(?:prs?|pull requests?|issues?)\b", sentence) and re.search(
+                r"(?:not (?:to )?(?:open|submit|use)|do not (?:open|submit|use)|should not (?:open|submit|use))", sentence)):
+            if not re.search(r"(?:no restriction|not prohibited|not forbidden|do not prohibit|do not forbid)", sentence):
+                reviews.append(sentence.strip()[:400])
+    return PolicyResult(bool(hits), hits, source if hits or reviews else None, reviews)
 
 
 def scan_files(files: dict[str, str]) -> PolicyResult:
-    """``files`` maps repo path -> text. First file with a match wins."""
+    """Hard bans take priority; otherwise retain the first review signal.
+
+    A missing signal is not permission. The full documents still need review.
+    """
+    review = None
     for path, text in files.items():
         if any(fnmatch.fnmatchcase(path, pattern) for pattern in POLICY_FILES):
             r = scan_text(text, path)
             if r.anti_ai:
                 return r
-    return PolicyResult(False)
+            if r.agent_review and review is None:
+                review = r
+    return review or PolicyResult(False)
 
 
 _AI = re.compile(r"(?:\bai\b|\bllms?\b|copilot|chatgpt|claude|gemini|generative|machine[- ]generated)", re.I)

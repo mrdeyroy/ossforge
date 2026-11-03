@@ -70,6 +70,8 @@ def snippet(dest: Path, path: str, line: int, radius: int = 4) -> str:
 def hunt(cfg: Config, repo: str, q: Queue, stats: Stats, work: str = "fix") -> dict:
     dest = clone(cfg, repo)
     pol = policy_of(dest)
+    if pol.agent_review:
+        return {"repo": repo, "policy_review_needed": pol.source, "clean": 0, "duplicate": 0}
     if pol.anti_ai:
         return {"repo": repo, "anti_ai": pol.source, "clean": 0, "duplicate": 0}
     found = audit_mod.scan_tree(dest) + external.ruff_findings(dest) + external.js_findings(dest)
