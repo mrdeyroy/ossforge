@@ -35,7 +35,7 @@ def positive_interval(value: str) -> float:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser("ossforge")
-    ap.add_argument("--config", default="ossforge.yaml")
+    ap.add_argument("--config", default=None)
     ap.add_argument("--json", action="store_true", help="machine-readable output (radar, acceptance, scout, features, queue, doctor, whoami, submit)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -129,6 +129,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
+    explicit_config = a.config is not None
+    a.config = a.config if explicit_config else "ossforge.yaml"
+    if explicit_config and not Path(a.config).is_file():
+        print(f"REFUSED: explicit config file unavailable: {a.config}; no default workflow state opened", file=sys.stderr)
+        return 2
     cfg = load(a.config)
     # Emergency controls must not depend on readable workflow state.
     if a.cmd == "stop":
