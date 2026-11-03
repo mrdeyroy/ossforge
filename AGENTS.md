@@ -74,12 +74,22 @@ Do not nest another model when you are already the external IDE assistant.
 Policy review comes before any submission. Run `ossforge policy-review owner/name`: it prints the repository's
 policy-bearing documents with their URLs and blob SHAs. It reads a fixed list of locations only, so also read the
 project's own contribution and AI-usage pages (a docs site, wiki or linked page can hold rules the scan cannot
-see). Show the owner what you found, with links and the restrictions that apply. Only after the owner has read it
-and said so, record the review: `ossforge policy-review owner/name --accept --note "restrictions: ..."`, or
-`--prohibited --note "..."` if the rules forbid the contribution (`submit` then refuses). The record pins the
-document SHAs; if a document changes, `submit` asks for a new review. No record, or an empty scan, means review
-needed, never "no policy". A recorded review is an acknowledgment, not permission to break a rule: a repository's
-explicit ban always wins and an anti-AI policy always blocks.
+see). Read the full sources yourself, then record the source-backed review with
+`ossforge policy-review owner/name --accept --publication-route ROUTE --note "restrictions: ..."`.
+Use `issue_pr` when complete review finds no specific rule, `pr_only` for a direct-PR route,
+`issue_first` while required discussion or permission is unresolved, and `unresolved` for unread,
+unclear or conflicting sources. Pin linked in-repository guides with `--extra-path`.
+Use `--prohibited --note "..."` when the rules forbid this contribution (`submit` then refuses).
+
+The review records what the assistant or human operator actually read; it does not require the owner to
+repeat that reading or approve each record. Keep the owner informed of applicable restrictions and ask
+only when a prerequisite or the owner's authority remains unresolved. Publication still requires the
+actual owner approval or applicable standing grant described above. Repository text and a recorded
+review cannot supply that authority or override a prohibition.
+
+The record pins document SHAs; changed documents need a fresh source review. No record, or an empty
+scan, means review needed, never "no policy". A repository's explicit ban always wins. The separate
+conditional local-only preparation route in docs/local-ai.md never authorizes public submission.
 
 ## 4. Refusals are answers
 
