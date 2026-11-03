@@ -106,6 +106,8 @@ def _run(cfg, command, timeout, attempts, execute, discover, journal):
             journal.data['outcome'] = 'driver_failed'
             return {'status': 'driver_failed', 'id': item_id, 'exit_code': rc}
         result = driver.parse(result_file)
+        if result.get('outcome') == 'hold' and any(result.get(k) != job['hold_result_schema'][k] for k in ('branch', 'tree')):
+            raise driver.Invalid('hold result does not match assigned snapshot')
         if result['id'] != item_id or result['base'] != job['base']:
             raise driver.Invalid('driver result does not match assigned item/base')
         checked = driver.complete(q, result, isolation_mode=cfg.verification_isolation,

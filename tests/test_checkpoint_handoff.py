@@ -26,7 +26,7 @@ def test_checkpoint_suggested_public_command_reaches_task_without_hooks(tmp_path
     assert cli.main(first['next_argv'][1:]) == 0
     saved = Queue(cfg.path('queue.json'))
     monkeypatch.setattr(agent_next.submit, '_base', lambda *a: 'base')
-    monkeypatch.setattr(evidence, 'capture', lambda *a: {})
+    monkeypatch.setattr(evidence, 'capture', lambda *a: {'branch': 'main', 'tree': 'tree'})
     second = agent_next.next_step(cfg, saved, str(cfgpath))
     assert second['status'] == 'work_candidate'
     assert second['task']['source_issue'] == 42

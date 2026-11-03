@@ -22,7 +22,7 @@ def task(queue: Queue, item_id: str | None = None) -> dict:
         return {'schema': 1, 'status': 'no_work', 'reason': 'no clean cloned candidate; run discovery/hunt or review the queue'}
     clone = Path(item.clone)
     base = submit._base(str(clone))
-    evidence.capture(clone, base, [])  # refuse dirty/detached candidates before spending a driver attempt
+    snapshot = evidence.capture(clone, base, [])  # refuse dirty/detached candidates before spending a driver attempt
     return {'schema': 1, 'status': 'ready', 'id': item.id, 'repo': item.repo,
             'clone': str(clone.resolve()), 'base': base, 'candidate': item.detail,
             'path': item.path, 'line': item.line, 'notes': item.notes, 'source_issue': item.source_issue,
@@ -35,7 +35,9 @@ def task(queue: Queue, item_id: str | None = None) -> dict:
                               'check_commands': [['lint-executable']], 'failure_code': 1,
                               'issue_title': 'specific problem', 'issue_body': 'reproduction and evidence',
                               'pr_title': 'specific fix', 'pr_body': 'fix and test evidence', 'consent_issue': 0},
-            'next': 'agent-verify RESULT.json; then submit ID (dry run) or explicitly submit ID --yes'}
+            'hold_result_schema': {'schema': 1, 'id': item.id, 'base': base, 'branch': snapshot['branch'],
+                                   'tree': snapshot['tree'], 'outcome': 'hold', 'reason': 'specific unmet prerequisite and evidence'},
+            'next': 'agent-verify RESULT.json; hold needs unchanged checkout; a fix needs actual verification before separate submit'}
 
 
 KEYS = {'schema', 'id', 'base', 'branch', 'test_command', 'check_commands', 'failure_code',
@@ -49,6 +51,13 @@ def parse(path: Path) -> dict:
         data = json.loads(path.read_text(encoding='utf-8'))
     except (ValueError, UnicodeError) as exc:
         raise Invalid('result must be UTF-8 JSON') from exc
+    if isinstance(data, dict) and data.get('outcome') == 'hold':
+        if set(data) != {'schema', 'id', 'base', 'branch', 'tree', 'outcome', 'reason'} or type(data['schema']) is not int or data['schema'] != 1:
+            raise Invalid('hold result must match exact schema 1 keys')
+        for key in ('id', 'base', 'branch', 'tree', 'reason'):
+            if not isinstance(data[key], str) or not data[key].strip() or '\x00' in data[key]:
+                raise Invalid(f'{key} must be nonempty text without NUL')
+        return data
     if not isinstance(data, dict) or set(data) != KEYS or type(data['schema']) is not int or data['schema'] != 1:
         raise Invalid('result must match exact schema 1 keys')
     for key in ('id', 'base', 'branch', 'issue_title', 'issue_body', 'pr_title', 'pr_body'):
@@ -75,6 +84,15 @@ def complete(queue: Queue, result: dict, *, isolation_mode: str = "none", readon
     if base != result['base']:
         raise Invalid('base changed; refresh task and recheck the patch')
     current = evidence.capture(clone, base, [])
+    if result.get('outcome') == 'hold':
+        if item.submitted:
+            raise Invalid('hold cannot hide partial publication; reconcile it first')
+        if any(current[key] != result[key] for key in ('base', 'branch', 'tree')):
+            raise Invalid('hold result no longer matches assigned checkout; preserve changes and inspect')
+        queue.set(item.id, status='held', hold_reason=result['reason'])
+        queue.save()
+        return {'schema': 1, 'status': 'held', 'id': item.id, 'reason': result['reason'],
+                'next': 'resolve prerequisite before explicit unhold; independent discovery may continue'}
     if current['branch'] != result['branch']:
         raise Invalid('result branch does not match active checkout')
     outcome = verify.verify_fix(clone, base, Path('unused'), [], test_command=result['test_command'],

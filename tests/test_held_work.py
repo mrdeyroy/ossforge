@@ -31,7 +31,7 @@ def test_held_status_roundtrip_and_other_work_selected(tmp_path, monkeypatch):
     q.save()
     q = Queue(q.path)
     monkeypatch.setattr(driver.submit, '_base', lambda *a: 'base')
-    monkeypatch.setattr(driver.evidence, 'capture', lambda *a: {})
+    monkeypatch.setattr(driver.evidence, 'capture', lambda *a: {'branch': 'main', 'tree': 'tree'})
     assert driver.task(q)['id'] == 'ready'
 
 

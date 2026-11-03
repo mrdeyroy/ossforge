@@ -250,3 +250,20 @@ partial-read prerequisite before following its retry argv. Use explicit `hunt`
 only when inspecting a policy-compatible target for new static findings. The
 controlled checkpoint-to-task tests are not proof of a real native IDE completing
 a useful upstream contribution.
+
+### A driver can report an unmet qualification prerequisite
+
+A task also supplies `hold_result_schema`, a separate exact schema-1 result with
+`outcome: hold`, the assigned item/base/branch/tree, and a specific `reason`.
+Use it when current investigation cannot establish a reproducible source bug,
+for example because reporter data or required hardware is missing. Do not invent
+a patch or a passing test to fill the ordinary fix-result contract.
+
+`agent-verify` accepts this disposition only for clean cloned work without partial
+publication and an unchanged checkout snapshot. The bounded runner also compares
+it against the snapshot assigned before launch. Dirty or committed changes stop
+for inspection, with files preserved. A hold records the unmet prerequisite, not
+a verified bug, rejection or submission, and runs no native checks or publication.
+The CLI returns nonzero for held work so automation cannot count it as successful
+verification. The consumed driver attempt stays counted; later runs do not relaunch
+that held task. Use explicit `unhold` only after its prerequisite is resolved.

@@ -46,5 +46,5 @@ def test_uncloned_lead_does_not_hide_ready_lower_ranked_candidate(tmp_path, monk
     q.add(Item('uncloned', 'owner/one', '', 1, 'feature', 'lead', status='clean', rank=20))
     q.add(Item('ready', 'owner/two', 'm.py', 1, 'issue', 'lead', status='clean', rank=10, clone=str(tmp_path)))
     monkeypatch.setattr(driver.submit, '_base', lambda *a: 'base')
-    monkeypatch.setattr(driver.evidence, 'capture', lambda *a: {})
+    monkeypatch.setattr(driver.evidence, 'capture', lambda *a: {'branch': 'main', 'tree': 'tree'})
     assert driver.task(q)['id'] == 'ready'

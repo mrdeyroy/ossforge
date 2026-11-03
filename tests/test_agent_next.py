@@ -63,7 +63,7 @@ def test_completed_url_not_republished_and_no_work_is_not_global_absence(tmp_pat
 def test_clean_and_dirty_candidate_paths(tmp_path, monkeypatch):
     cfg, q, item = fixture(tmp_path, monkeypatch)
     item.status = 'clean'
-    monkeypatch.setattr(evidence, 'capture', lambda *a: {})
+    monkeypatch.setattr(evidence, 'capture', lambda *a: {'branch': 'main', 'tree': 'tree'})
     assert agent_next.next_step(cfg, q, 'c')['status'] == 'work_candidate'
     monkeypatch.setattr(evidence, 'capture', lambda *a: (_ for _ in ()).throw(evidence.StaleEvidence('dirty')))
     assert agent_next.next_step(cfg, q, 'c')['status'] == 'inspect_local'
@@ -142,5 +142,5 @@ def test_existing_candidate_remains_actionable_during_cooldown(tmp_path, monkeyp
     cfg.path('ratelimit_until').parent.mkdir(parents=True)
     cfg.path('ratelimit_until').write_text(str(time.time() + 100))
     item.status = 'clean'
-    monkeypatch.setattr(evidence, 'capture', lambda *a: {})
+    monkeypatch.setattr(evidence, 'capture', lambda *a: {'branch': 'main', 'tree': 'tree'})
     assert agent_next.next_step(cfg, q, 'c')['status'] == 'work_candidate'
