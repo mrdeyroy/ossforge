@@ -330,13 +330,60 @@ def test_native_review_pins_real_files_and_never_runs_command(monkeypatch, tmp_p
     def content(path, **kw):
         if '/contents/' in path:
             assert kw['ref'] == 'exact-tip'
-            return {'type': 'file', 'sha': 'file-sha', 'html_url': 'observed-file-url'}
+            return {'type': 'file', 'sha': 'file-sha', 'html_url': 'observed-file-url', 'encoding': 'base64', 'content': 'Y29kZQ=='}
         return api(path, **kw)
     monkeypatch.setattr(repo_research.gh, 'api', content)
     monkeypatch.setattr(repo_research.gh, 'file_text', lambda *a, **kw: 'source text reviewed by IDE')
-    review = repo_research.review_native(cfg, 'custom/code.py', 'HACKING.md', ['pytest', 'native'])
+    review = repo_research.review_native(cfg, 'custom/code.py', 'HACKING.md', ['pytest', 'native'], 'Implementation reviewed; guide uses native pytest; dependencies still untested')
     assert review['revision'] == 'exact-tip' and len(review['sources']) == 2
     assert review['test_command'] == ['pytest', 'native']
     assert 'not proof' in review['warning']
     with pytest.raises(repo_research.Invalid, match='inside'):
         repo_research.review_native(cfg, '../outside', 'HACKING.md', ['pytest'])
+
+
+@pytest.mark.parametrize('source,guide', [('src/a.py#junk','TEST.md'), ('src/a.py?ref=evil','TEST.md'),
+    ('src/*.py','TEST.md'), ('src\\a.py','TEST.md'), ('src/a.py','src/a.py'),
+    ('src/./a.py','TEST.md'), ('README.md','CONTRIBUTING.md')])
+def test_native_review_invalid_citations_refuse_before_network(monkeypatch, tmp_path, source, guide):
+    cfg = Config(state_dir=str(tmp_path))
+    monkeypatch.setattr(repo_research, 'refresh', lambda *a: (_ for _ in ()).throw(AssertionError('network reached')))
+    with pytest.raises(repo_research.Invalid):
+        repo_research.review_native(cfg, source, guide, ['pytest'], 'source-qualified feasibility, not proof')
+
+
+def test_empty_native_flag_refuses_without_prepare(monkeypatch, tmp_path):
+    from ossforge import cli
+    cfg = tmp_path/'config.yml'
+    cfg.write_text(f'state_dir: {tmp_path}/state\n')
+    monkeypatch.setattr(repo_research, 'prepare', lambda *a: (_ for _ in ()).throw(AssertionError('network reached')))
+    assert cli.main(['--config', str(cfg), 'research-repo', '--review-native-source', '']) == 1
+
+
+def test_native_citation_real_gh_request_keeps_encoded_path_and_ref(monkeypatch, tmp_path):
+    import json
+    from types import SimpleNamespace
+    from ossforge import gh
+    real_api = gh.api
+    setup_sources(monkeypatch)
+    cfg = Config(state_dir=str(tmp_path/'state'), kill_file=str(tmp_path/'STOP'))
+    repo_research.prepare(cfg)
+    lead = repo_research.load(cfg)['lead']
+    monkeypatch.setattr(repo_research, 'refresh', lambda cfg: lead)
+    # Restore the actual API wrapper to inspect the subprocess argv it builds.
+    api_module = gh
+    monkeypatch.setattr(api_module, "api", real_api)
+    monkeypatch.setattr(api_module, '_guard_cooldown', lambda: None)
+    monkeypatch.setattr(api_module, '_budget', lambda *a: None)
+    monkeypatch.setattr(api_module, '_sleep', lambda *a: None)
+    calls = []
+    def run(argv, **kw):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({'type': 'file', 'sha': 'blob',
+            'html_url': 'observed-url', 'encoding': 'base64', 'content': 'Y29kZQ=='}))
+    monkeypatch.setattr(api_module.subprocess, 'run', run)
+    review = repo_research.review_native(cfg, 'custom dir/code.py', 'test guide.md', ['pytest'], 'Code and test guide reviewed; dependencies still uncertain')
+    assert calls[0][5] == 'repos/org/one/contents/custom%20dir/code.py'
+    assert 'ref=exact-tip' in calls[0]
+    assert all('#' not in a and '?ref=' not in a for call in calls for a in call)
+    assert review['revision'] == 'exact-tip'

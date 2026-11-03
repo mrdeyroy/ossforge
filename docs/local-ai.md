@@ -467,9 +467,14 @@ this code-bug route must not invent bugs in a resource list to satisfy a quota.
 If suitability is unresolved, inspect the source and native test instructions.
 Defer a documentation-only target for this session, or record a nonstandard code
 layout with `research-repo --review-native-source PATH --native-guide GUIDE
+--native-note "implementation, test route and remaining uncertainty"
 --native-test-command EXEC ARG...`. Read both cited files first. This pins two
 readable implementation/instruction files and the proposed native command to the
-selected revision. It is a review assertion, not proof the command ran and not a
+selected revision using the remaining repository-search session allowance. The
+implementation citation must be a code file; readable paths and file extensions
+do not prove semantic relevance or runnable tests. Original collection/unknown
+status and evidence remain visible alongside the explicit review assertion. This
+is source-qualified feasibility, not proof the command ran and not a
 permission or policy override. A new revision needs a new review. `--begin`
 requires a conventional code layout or this current source-backed feasibility
 review; the normal policy, checkout, duplicate and native verification gates
