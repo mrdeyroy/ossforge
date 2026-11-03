@@ -91,6 +91,18 @@ Do not start a nested model process just because you are already an AI assistant
 > an owner decision, a cooldown or a concrete unresolved prerequisite. Starting
 > this prompt does not install a background service or continue after IDE closure.
 
+### Preserving a completed local-preparation review
+
+A completed local-only preparation remains `awaiting_owner_review`; it never
+becomes permission to publish. Its default checkpoint now includes an explicit
+`agent-next --scope research` alternative for repo-first work. The IDE may choose
+that read-only view to continue an independent investigation while retaining the
+completed preparation's review link and publication hold. It does not discard or
+alter the terminal journal, start a search, extend a search budget or clear a hold.
+An active preparation, invalid receipt, STOP, partial publication, queued candidate
+or current verified work still takes its normal priority. Without an active
+investigation, an exhausted search session remains exhausted.
+
 ### Read-only checkpoint
 
 `agent-next` reads local state and checks current local content receipts. It never

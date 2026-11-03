@@ -81,6 +81,14 @@ def test_native_verification_stays_outside_public_queue(prepared, monkeypatch):
     from ossforge import agent_next
     checkpoint = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg.yml')
     assert checkpoint['status'] == 'awaiting_owner_review'
+    cfg.repo_first = True
+    before = cfg.path('local_preparation.json').read_bytes()
+    monkeypatch.setattr(repo_research, 'load', lambda *a: {'lead': {'status': 'investigating'}})
+    monkeypatch.setattr(repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
+    selected = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg.yml', 'research')
+    assert selected['status'] == 'repo_investigation'
+    assert selected['preserved_preparation']['publication_hold']
+    assert cfg.path('local_preparation.json').read_bytes() == before
     assert 'STOP' in preparation.task(cfg)['next']
     assert 'result_schema' not in preparation.task(cfg)
 
