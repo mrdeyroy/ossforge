@@ -48,7 +48,11 @@ def _load(cfg: Config) -> dict:
 
 
 def record(cfg: Config, repo: str, snap: dict, note: str, prohibited: bool = False,
-           publication_route: str | None = None) -> dict:
+           publication_route: str | None = None, local_preparation: str = "unresolved") -> dict:
+    if local_preparation not in {"allowed", "forbidden", "unresolved"}:
+        raise ValueError("unsupported local preparation scope")
+    if local_preparation != "unresolved" and not note.strip():
+        raise ValueError("local preparation decision needs a source-backed note")
     if publication_route not in (None, "issue_pr", "pr_only", "issue_first", "unresolved"):
         raise ValueError("unsupported publication route")
     if publication_route is not None and not note.strip():
@@ -56,6 +60,7 @@ def record(cfg: Config, repo: str, snap: dict, note: str, prohibited: bool = Fal
     rec = {"repo": repo, "reviewed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "note": note,
            "prohibited": prohibited, "docs": [{k: d[k] for k in ("path", "url", "sha")} for d in snap["docs"]],
            "scanned_locations": snap["scanned_locations"], "extra_paths": snap.get("extra_paths", [])}
+    rec["local_preparation"] = local_preparation
     if publication_route is not None:
         rec["publication_route"] = publication_route
     allr = _load(cfg)
@@ -96,3 +101,17 @@ def publication_route(cfg: Config, repo: str) -> str | None:
     if route in {"issue_first", "unresolved"}:
         raise ValueError(f"publication route {route}: review issue-first prerequisites or unresolved rules before submission")
     return route
+
+
+def preparation_review(cfg: Config, repo: str, snap: dict) -> dict | None:
+    """Current source-scoped decision, never an exception to public policy.
+
+    A license can permit independent modification without a community policy
+    explicitly discussing local development. The review must explain that scope.
+    """
+    rec = _load(cfg).get(repo.lower())
+    if not rec or rec.get('local_preparation') != 'allowed' or not rec.get('note', '').strip():
+        return None
+    if not snap.get('docs') or {d['path']: d['sha'] for d in snap['docs']} != {d['path']: d['sha'] for d in rec['docs']}:
+        return None
+    return rec

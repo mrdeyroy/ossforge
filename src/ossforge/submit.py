@@ -223,6 +223,12 @@ def preflight(it: Item, limiter: DailyLimiter, cfg: Config, history: list[dict])
         safety.kill_switch(cfg)
     except safety.Blocked as e:
         raise Refused(str(e)) from e
+    from .preparation import public_guard
+    try:
+        if it.clone:
+            public_guard(it.clone)
+    except ValueError as exc:
+        raise Refused(str(exc)) from exc
     _publication_mode(it, cfg)
     if it.status != "verified":
         raise Refused(f"status is {it.status!r}, must be 'verified'")

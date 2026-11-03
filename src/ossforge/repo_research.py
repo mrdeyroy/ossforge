@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from . import acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit, vet
+from . import preparation, acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit, vet
 from .queue import Item, Queue, item_id
 from .config import Config
 from . import research_session, repo_suitability
@@ -232,8 +232,11 @@ def begin(cfg: Config) -> dict:
     No finding, queue item, patch or permission is manufactured by this step.
     """
     lead = refresh(cfg)
-    if lead['holds']:
-        raise Invalid('; '.join(lead['holds']))
+    prep_review = policy_review.preparation_review(cfg, lead['repo'], lead['policy'])
+    prep = bool(prep_review and (lead['policy']['anti_ai'] or lead['policy'].get('agent_review') or prep_review.get('prohibited')))
+    blocking = [h for h in lead['holds'] if not (prep and h in {'literal contribution prohibition; do not target', 'agent-specific contribution restriction needs review'})]
+    if blocking:
+        raise Invalid('; '.join(blocking))
     review = lead.get('native_review', {})
     reviewed = (review.get('revision') == lead['revision'] and bool(review.get('note'))
                 and bool(review.get('test_command')) and len(review.get('sources', [])) == 2
@@ -241,6 +244,8 @@ def begin(cfg: Config) -> dict:
                 and review.get('suitability_status') == lead['code_suitability']['status'])
     if lead['code_suitability']['status'] != 'native_candidate' and not reviewed:
         raise Invalid('native code suitability unresolved: ' + lead['code_suitability']['reason'])
+    if prep:
+        return preparation.begin(cfg, lead, prep_review)
     why = policy_review.check(cfg, lead['repo'], lead['policy'])
     if why:
         raise Invalid(why)
@@ -299,6 +304,7 @@ def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 
         raise Invalid('a specific bounded candidate description and positive line are required')
     rel = Path(path)
     root = Path(lead['clone'])
+    preparation.public_guard(root)
     file = root / rel
     if (rel.is_absolute() or '..' in rel.parts or not file.is_file()
             or file.is_symlink() or not file.resolve().is_relative_to(root.resolve())):

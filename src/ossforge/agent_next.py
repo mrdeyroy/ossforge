@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from . import research_session, repo_research, qualification, driver, evidence, submit
+from . import preparation, research_session, repo_research, qualification, driver, evidence, submit
 from .config import Config
 from .queue import Queue
 
@@ -36,7 +36,7 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
             continue
         try:
             evidence.check(Path(item.clone), submit._base(item.clone), item.branch, item.verification)
-        except (evidence.StaleEvidence, submit.Refused, OSError) as exc:
+        except (ValueError, evidence.StaleEvidence, submit.Refused, OSError) as exc:
             return result("inspect_local", id=item.id, clone=item.clone, reason=str(exc),
                           warning="preserve work; inspect changes and rerun verification, never reset automatically")
         return result("verified_ready", id=item.id, repo=item.repo, clone=item.clone,
@@ -44,7 +44,7 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
                       reason="local content receipt is current; dry-run still rechecks live policy, identity, duplicate and upstream state")
     try:
         task = driver.task(queue)
-    except (evidence.StaleEvidence, submit.Refused, OSError) as exc:
+    except (ValueError, evidence.StaleEvidence, submit.Refused, OSError) as exc:
         return result("inspect_local", reason=str(exc), warning="preserve the checkout; do not overwrite or reset it")
     if task["status"] == "ready":
         return result("work_candidate", task=task,
@@ -94,6 +94,11 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
                       held=[{"id": i.id, "repo": i.repo, "reason": i.hold_reason} for i in held],
                       next_argv=prefix + (["research-repo"] if cfg.repo_first else ["loop", "--once", "--prepare-only"]),
                       warning="independent discovery may continue; unhold only after its prerequisite is resolved")
+    prep = preparation._load(cfg)
+    if prep and prep['status'] == 'local_investigation':
+        return result('local_preparation', preparation=prep,
+                      next_argv=prefix + ['preparation-task'],
+                      warning='No public queue or submission; source scope still required.')
     if cfg.repo_first:
         try:
             lead = repo_research.load(cfg)['lead']

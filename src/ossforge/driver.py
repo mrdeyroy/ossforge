@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import evidence, submit, verify
+from . import preparation, evidence, submit, verify
 from .queue import Queue
 
 
@@ -21,6 +21,10 @@ def task(queue: Queue, item_id: str | None = None) -> dict:
     if not item or item.status != 'clean' or not item.clone:
         return {'schema': 1, 'status': 'no_work', 'reason': 'no clean cloned candidate; run discovery/hunt or review the queue'}
     clone = Path(item.clone)
+    try:
+        preparation.public_guard(clone)
+    except ValueError as exc:
+        raise Invalid(str(exc)) from exc
     base = submit._base(str(clone))
     snapshot = evidence.capture(clone, base, [])  # refuse dirty/detached candidates before spending a driver attempt
     return {'schema': 1, 'status': 'ready', 'id': item.id, 'repo': item.repo,
@@ -80,6 +84,10 @@ def complete(queue: Queue, result: dict, *, isolation_mode: str = "none", readon
     if not item or item.status != 'clean' or not item.clone:
         raise Invalid('result must target an existing clean cloned candidate')
     clone = Path(item.clone)
+    try:
+        preparation.public_guard(clone)
+    except ValueError as exc:
+        raise Invalid(str(exc)) from exc
     base = submit._base(str(clone))
     if base != result['base']:
         raise Invalid('base changed; refresh task and recheck the patch')
