@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("scout", "find vetted fix issues", language={}, label={"default": "help wanted"}, limit={"type": int, "default": 20})
     add("discover", "rotate bounded broad/history/preferred issue discovery", language={},
         label={"default": "help wanted"}, limit={"type": int, "default": 20},
-        strategy={"choices": ["rotate", "broad", "history", "preferred"], "default": "rotate"},
+        strategy={"choices": ["rotate", "broad", "history", "preferred", "breadth-first"], "default": "rotate"},
         include_recent={"action": "store_true"})
     add("features", "find vetted feature issues", language={}, limit={"type": int, "default": 15})
     ir = add("review-issue", "skip an explicitly reviewed issue until upstream activity changes", "repo")
