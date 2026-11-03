@@ -61,8 +61,12 @@ def scan_text(text: str, source: str | None = None) -> PolicyResult:
     reviews = []
     # Join ordinary Markdown line wraps, then isolate contrast clauses so a
     # permission about human assistance cannot negate an agent restriction.
-    normalized = re.sub(r"\s+", " ", hay)
-    for sentence in re.split(r"[.!?;]+|\bbut\b|\bhowever\b", normalized):
+    # Paragraphs, headings and list items are independent evidence units.
+    # Join only soft wraps within a unit, never unrelated Markdown blocks.
+    blocks = re.split(r"\n\s*\n|\n(?=\s*(?:[-+*] |\d+[.)] |#{1,6} ))", hay)
+    normalized = [re.sub(r"\s+", " ", block) for block in blocks]
+    for sentence in (clause for block in normalized
+                     for clause in re.split(r"[.!?;]+|\bbut\b|\bhowever\b", block)):
         # This is a review signal, not a global AI ban or a permission parser.
         if (re.search(r"\b(?:autonomous|code) agents?\b", sentence)
                 and re.search(r"\b(?:prs?|pull requests?|issues?)\b", sentence) and re.search(

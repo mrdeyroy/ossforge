@@ -141,3 +141,16 @@ def test_hunt_prioritizes_hard_ban_even_for_mixed_result(monkeypatch, tmp_path):
                                                                         'CONTRIBUTING.md', ['review']))
     result = hunt.hunt(Config(), 'org/repo', None, None)
     assert result['anti_ai'] == 'CONTRIBUTING.md' and not result.get('policy_review_needed')
+
+
+def test_unrelated_markdown_blocks_do_not_create_synthetic_restriction():
+    for text in ['- Code agents should not use global variables\n- Issues are tracked on GitHub',
+                 'Code agents should not use global variables\n\nIssues are tracked on GitHub',
+                 '1. Code agents should not use global variables\n2. Issues are tracked on GitHub']:
+        result = policy.scan_text(text)
+        assert not result.agent_review and not result.anti_ai
+
+
+def test_wrapped_restriction_within_markdown_item_still_holds():
+    result = policy.scan_text('- Autonomous agents should not\n  submit PRs or issues.\n- Human assistance is welcome.')
+    assert result.agent_review and not result.anti_ai
