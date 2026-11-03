@@ -15,10 +15,15 @@ from .config import Config
 from .queue import Queue
 
 
-def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
+def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default') -> dict:
+    if scope not in {'default', 'research'}:
+        raise ValueError('unsupported checkpoint scope')
+    if scope == 'research' and not cfg.repo_first:
+        raise ValueError('research checkpoint scope requires repo_first: true')
     prefix = ["ossforge", "--config", config_path]
+    continuation = prefix + ['agent-next'] + (['--scope', 'research'] if scope == 'research' else [])
     def result(status, **kw):
-        return {"schema": 1, "status": status, "local_only": True,
+        return {"schema": 1, "status": status, "local_only": True, "continue_argv": continuation,
                 "publication": "requires owner authorization; never inferred from this checkpoint", **kw}
     if Path(cfg.kill_file).exists():
         return result("stopped", reason="kill switch is set; do not resume without the owner's instruction")
@@ -94,13 +99,22 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
                       held=[{"id": i.id, "repo": i.repo, "reason": i.hold_reason} for i in held],
                       next_argv=prefix + (["research-repo"] if cfg.repo_first else ["loop", "--once", "--prepare-only"]),
                       warning="independent discovery may continue; unhold only after its prerequisite is resolved")
+    preserved_preparation = None
     try:
         prep = preparation._load(cfg)
         if prep:
             checkpoint = preparation.task(cfg)
-            return result('local_preparation' if prep['status'] == 'local_investigation' else 'awaiting_owner_review',
-                          preparation=checkpoint, next_argv=prefix + ['preparation-task'],
-                          warning='No public queue or submission; source scope still required.')
+            if scope == 'research' and prep['status'] == 'awaiting_owner_review' and cfg.repo_first:
+                preserved_preparation = {'id': prep['id'], 'repo': prep['repo'],
+                    'status': prep['status'], 'publication_hold': True,
+                    'review_argv': prefix + ['preparation-task']}
+            else:
+                return result('local_preparation' if prep['status'] == 'local_investigation' else 'awaiting_owner_review',
+                              preparation=checkpoint, next_argv=prefix + ['preparation-task'],
+                              research_checkpoint_argv=prefix + ['agent-next', '--scope', 'research']
+                                  if prep['status'] == 'awaiting_owner_review' and cfg.repo_first else None,
+                              warning='No public queue or submission; source scope still required. '
+                                      'An explicit research checkpoint preserves this completed review hold.')
     except (ValueError, OSError, evidence.StaleEvidence, identity.IdentityError) as exc:
         return result('inspect_local', reason=str(exc), warning='preserve local preparation before continuing')
     if cfg.repo_first:
@@ -109,10 +123,14 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
             if not lead or lead['status'] != 'investigating':
                 session = research_session.status(cfg)
                 if session['status'] != 'search_session_active':
-                    return result(session['status'], session=session,
+                    return result(session['status'], session=session, preserved_preparation=preserved_preparation,
                                   next_argv=prefix + ['research-session'],
                                   warning='choose an explicit search budget; resume never extends it, exhausted search is not proof of no opportunity')
-            return repo_research.checkpoint(cfg, prefix)
+            checkpoint = repo_research.checkpoint(cfg, prefix)
+            checkpoint['continue_argv'] = continuation
+            if preserved_preparation:
+                checkpoint['preserved_preparation'] = preserved_preparation
+            return checkpoint
         except (research_session.Invalid, repo_research.Invalid) as exc:
             return result("inspect_local", reason=str(exc), warning="preserve repository research state; do not reset it")
     completed = [i for i in queue.items.values() if i.submitted.get("pr_url") or i.submitted.get("pr")]

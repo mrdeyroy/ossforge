@@ -103,6 +103,10 @@ def test_real_cli_checkpoint_config_stop_and_no_network(tmp_path):
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
     assert out['status'] == 'no_work' and str(cfg) in out['next_argv']
+    p = subprocess.run([*entry, '--config', str(cfg), 'agent-next', '--scope', 'research'],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 1 and 'REFUSED: research checkpoint scope requires' in p.stderr
+    assert 'Traceback' not in p.stderr
 
 
 def test_no_work_honors_recorded_cooldown_without_search(tmp_path, monkeypatch):
@@ -144,3 +148,96 @@ def test_existing_candidate_remains_actionable_during_cooldown(tmp_path, monkeyp
     item.status = 'clean'
     monkeypatch.setattr(evidence, 'capture', lambda *a: {'branch': 'main', 'tree': 'tree'})
     assert agent_next.next_step(cfg, q, 'c')['status'] == 'work_candidate'
+
+
+@pytest.mark.parametrize('terminal', [True, False])
+def test_explicit_research_scope_preserves_preparation(tmp_path, monkeypatch, terminal):
+    cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
+    queue = Queue(cfg.path('queue.json'))
+    status = 'awaiting_owner_review' if terminal else 'local_investigation'
+    prep = {'id': 'local-preparation:org/one', 'repo': 'org/one', 'status': status}
+    monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: dict(prep))
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: dict(prep))
+    monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': {'status': 'investigating'}})
+    monkeypatch.setattr(agent_next.repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
+    normal = agent_next.next_step(cfg, queue, 'cfg')
+    assert normal['status'] == ('awaiting_owner_review' if terminal else 'local_preparation')
+    chosen = agent_next.next_step(cfg, queue, 'cfg', 'research')
+    if terminal:
+        assert normal['research_checkpoint_argv'][-2:] == ['--scope', 'research']
+        assert chosen['status'] == 'repo_investigation'
+        assert chosen['preserved_preparation']['publication_hold'] is True
+    else:
+        assert chosen['status'] == 'local_preparation'
+    assert not cfg.path('queue.json').exists()
+    assert prep['status'] == status
+
+
+def test_explicit_research_scope_cannot_hide_bad_preparation(tmp_path, monkeypatch):
+    cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
+    monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: {'status': 'awaiting_owner_review'})
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: (_ for _ in ()).throw(ValueError('stale receipt')))
+    assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg', 'research')['status'] == 'inspect_local'
+
+
+@pytest.mark.parametrize('kind', ['stop', 'partial', 'verified'])
+def test_explicit_research_scope_preserves_priority(tmp_path, monkeypatch, kind):
+    cfg, queue, item = fixture(tmp_path, monkeypatch)
+    cfg.repo_first = True
+    monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: pytest.fail('earlier gate must win'))
+    if kind == 'stop':
+        Path(cfg.kill_file).touch()
+    elif kind == 'partial':
+        item.submitted = {'issue_url': 'https://github.com/owner/repo/issues/1'}
+    assert agent_next.next_step(cfg, queue, 'cfg', 'research')['status'] == {
+        'stop': 'stopped', 'partial': 'reconcile_remote', 'verified': 'verified_ready'}[kind]
+
+
+def test_research_scope_does_not_renew_expired_session(tmp_path, monkeypatch):
+    cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
+    prep = {'id': 'local-preparation:org/one', 'repo': 'org/one', 'status': 'awaiting_owner_review'}
+    monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: prep)
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: prep)
+    monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': None})
+    monkeypatch.setattr(agent_next.research_session, 'status', lambda *a: {'status': 'search_budget_exhausted'})
+    out = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg', 'research')
+    assert out['status'] == 'search_budget_exhausted'
+    assert out['preserved_preparation']['publication_hold']
+    assert not cfg.path('research_session.json').exists()
+
+
+def test_scoped_multistep_continuation_keeps_preserved_hold(tmp_path, monkeypatch):
+    cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
+    queue = Queue(cfg.path('queue.json'))
+    prep = {'id': 'local-preparation:org/one', 'repo': 'org/one', 'status': 'awaiting_owner_review'}
+    monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: prep)
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: prep)
+    monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': {'status': 'investigating'}})
+    monkeypatch.setattr(agent_next.repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
+    scope = 'research'
+    for _ in range(3):
+        out = agent_next.next_step(cfg, queue, 'cfg', scope)
+        assert out['status'] == 'repo_investigation'
+        assert out['continue_argv'] == ['ossforge', '--config', 'cfg', 'agent-next', '--scope', 'research']
+        scope = out['continue_argv'][-1]
+        assert out['preserved_preparation']['publication_hold']
+    assert agent_next.next_step(cfg, queue, 'cfg')['status'] == 'awaiting_owner_review'
+
+
+def test_research_scope_requires_repo_first(tmp_path):
+    cfg = Config(state_dir=str(tmp_path))
+    with pytest.raises(ValueError, match='requires repo_first'):
+        agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg', 'research')
+
+
+@pytest.mark.parametrize('kind', ['review', 'held'])
+def test_earlier_review_and_held_checkpoints_retain_explicit_scope(tmp_path, monkeypatch, kind):
+    cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
+    queue = Queue(cfg.path('queue.json'))
+    if kind == 'review':
+        monkeypatch.setattr(agent_next.qualification, 'pending', lambda *a: [{'repo': 'org/a', 'number': 2}])
+    else:
+        queue.add(Item('held', 'org/a', 'x.py', 1, 'bug', 'hypothesis', status='held'))
+    out = agent_next.next_step(cfg, queue, 'cfg', 'research')
+    assert out['status'] == ('review_needed' if kind == 'review' else 'held_work')
+    assert out['continue_argv'][-2:] == ['--scope', 'research']

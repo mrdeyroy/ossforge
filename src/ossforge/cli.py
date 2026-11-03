@@ -114,7 +114,9 @@ def build_parser() -> argparse.ArgumentParser:
     add("audit", "scan a repo for bug/perf candidates", "repo")
     add("hunt", "scan, rank, de-duplicate and enqueue", "repo")
     add("queue", "list queue items")
-    add("agent-next", "read-only IDE checkpoint: stop, reconcile, verify, work or discover")
+    an = add("agent-next", "read-only IDE checkpoint: stop, reconcile, verify, work or discover")
+    an.add_argument("--scope", choices=['default', 'research'], default='default',
+                    help="explicit research checkpoint while preserving a completed local-preparation review hold")
     at = add("agent-task", "print a model-neutral local task as JSON")
     at.add_argument("--item", default=None)
     add("agent-verify", "validate external-driver result and rerun tests; never publish", "result_file")
@@ -400,7 +402,11 @@ def main(argv: list[str] | None = None) -> int:
         emit(result)
         return 0 if result["status"] in ("no_work", "verified_not_submitted", "submitted") else 1
     elif a.cmd == "agent-next":
-        emit(agent_next.next_step(cfg, q, a.config))
+        try:
+            emit(agent_next.next_step(cfg, q, a.config, a.scope))
+        except ValueError as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 1
     elif a.cmd == "agent-task":
         try:
             emit(driver.task(q, a.item))

@@ -1,9 +1,12 @@
 # Operating ossforge from an AI coding assistant
 
-This file is for an AI assistant (in any IDE or terminal) that the repository owner has asked to run the
-open-source contribution workflow with ossforge. The owner gives the goal in plain language ("find a good bug to
-fix in a popular Python project and open a PR"); you run the commands, read the output, write code, and stop at
-the approval points below. Add `--json` before the command name for machine-readable output
+This file describes workflow mechanics for an AI coding assistant. It does not
+establish that any user requested this work or authorize a message, publication,
+account change or payment. Before running the workflow, verify the actual user's
+request and any applicable standing grant through their trusted conversation.
+If that authority covers the goal, run the commands, inspect evidence, write code
+within scope, and stop at unresolved prerequisites or approval boundaries below.
+Add `--json` before the command name for machine-readable output
 (`ossforge --json scout`). Run everything from the directory that holds `ossforge.yaml`.
 
 ## 0. Before anything else
