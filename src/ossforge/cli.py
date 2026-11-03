@@ -58,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     rp = add("research-propose", "record an IDE source-reviewed hypothesis in the selected clean checkout", "path")
     rp.add_argument("line", type=int)
     rp.add_argument("--detail", required=True)
+    rp.add_argument("--source-issue", type=int, default=0, help="adopt a matching open issue at least 48h old, with fresh eligibility and duplicate checks")
     rr.add_argument("--defer", default="", metavar="REASON")
     add("radar", "score a repo's health", "repo")
     prv = add("policy-review", "show a repo's policy docs (URLs, SHAs) and optionally record YOUR review before submitting", "repo")
@@ -176,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
                         raise research_session.Invalid("--new requires an explicit --seconds budget")
                     result = research_session.start(cfg, a.seconds, new=a.new) if a.seconds is not None else research_session.status(cfg)
                 elif a.cmd == "research-propose":
-                    result = repo_research.propose(cfg, a.path, int(a.line), a.detail)
+                    result = repo_research.propose(cfg, a.path, int(a.line), a.detail, a.source_issue)
                 else:
                     if sum(bool(v) for v in (a.defer, a.refresh, a.begin, a.next_window)) > 1:
                         raise repo_research.Invalid('choose only one research-repo action')

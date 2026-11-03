@@ -215,3 +215,91 @@ def test_begin_empty_checkout_returns_actionable_refusal(monkeypatch, tmp_path):
         repo_research.begin(cfg)
     assert root.exists()
     assert repo_research.load(cfg)['lead']['repo'] == 'org/one'
+@pytest.fixture
+def adoption(monkeypatch, tmp_path):
+    import subprocess
+    from datetime import datetime, timedelta, timezone
+    setup_sources(monkeypatch)
+    root = tmp_path/'checkout'
+    root.mkdir()
+    for cmd in (['init', '-b', 'main'], ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.invalid']):
+        subprocess.run(['git', *cmd], cwd=root, check=True, capture_output=True)
+    (root/'source.py').write_text('def example():\n    return 1\n')
+    subprocess.run(['git', 'add', '.'], cwd=root, check=True)
+    subprocess.run(['git', 'commit', '-m', 'fixture'], cwd=root, check=True, capture_output=True)
+    tip = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+    monkeypatch.setattr(repo_research.submit, '_source_work_gate', lambda *a: None)
+    source = {'state': 'open', 'html_url': 'https://github.com/org/one/issues/9',
+              'created_at': (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()}
+    def api(path, **kw):
+        if '/issues/' in path:
+            return source
+        return {'sha': tip, 'html_url': 'https://github.com/org/one/commit/fixture'} if '/commits/' in path else {
+            'default_branch': 'main', 'html_url': 'https://github.com/org/one'}
+    monkeypatch.setattr(repo_research.gh, 'api', api)
+    monkeypatch.setattr(repo_research.policy_review, 'check', lambda *a: '')
+    monkeypatch.setattr(repo_research.policy_review, 'publication_route', lambda *a: 'issue_pr')
+    monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: root)
+    monkeypatch.setattr(repo_research.vet, 'vet_issue', lambda *a, **kw: repo_research.vet.Verdict('org/one#9', 'approve'))
+    monkeypatch.setattr(repo_research.dedupe, 'find_matches', lambda *a, **kw: [
+        repo_research.dedupe.Match(9, 'matching issue', source['html_url'], 'open', False, .8, 'similar')])
+    monkeypatch.setattr(repo_research.dedupe, 'recent_commit_hits', lambda *a, **kw: [])
+    cfg = Config(state_dir=str(tmp_path/'state'), kill_file=str(tmp_path/'STOP'), repo_first=True)
+    prepare(cfg)
+    repo_research.begin(cfg)
+    return cfg, source
+
+
+def test_eligible_old_issue_reused_as_unverified_candidate(adoption):
+    cfg, _ = adoption
+    result = repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    item = Queue(cfg.path('queue.json')).items[result['id']]
+    assert item.source_issue == 9 and item.kind == 'issue' and item.status == 'clean'
+    assert not item.verification and not item.submitted
+    assert 'https://github.com/org/one/issues/9' in item.notes
+
+
+@pytest.mark.parametrize('decision,reasons', [
+    ('skip', ['claimed in comments']), ('skip', ['assigned']),
+    ('skip', ['1 open PR(s) reference it']), ('skip', ['closed or merged PR reference requires review']),
+    ('anti_ai', ['policy prohibition']), ('skip', ['comment coverage incomplete'])])
+def test_old_age_never_bypasses_fresh_vetting(adoption, monkeypatch, decision, reasons):
+    cfg, _ = adoption
+    monkeypatch.setattr(repo_research.vet, 'vet_issue', lambda *a, **kw:
+                        repo_research.vet.Verdict('org/one#9', decision, reasons))
+    with pytest.raises(repo_research.Invalid, match='not eligible'):
+        repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    assert not cfg.path('queue.json').exists()
+
+
+@pytest.mark.parametrize('change', [
+    {'state': 'closed'}, {'pull_request': {}}, {'created_at': 'bad'},
+    {'created_at': '2999-01-01T00:00:00Z'}, {'created_at': None},
+    {'html_url': 'https://github.com/other/repo/issues/9'}])
+def test_issue_identity_time_and_open_state_required(adoption, change):
+    cfg, source = adoption
+    source.update(change)
+    with pytest.raises(repo_research.Invalid):
+        repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    assert not cfg.path('queue.json').exists()
+
+
+def test_adoption_keeps_other_duplicates_and_requires_match(adoption, monkeypatch):
+    cfg, _ = adoption
+    monkeypatch.setattr(repo_research.dedupe, 'find_matches', lambda *a, **kw: [])
+    with pytest.raises(repo_research.Invalid, match='does not match'):
+        repo_research.propose(cfg, 'source.py', 1, 'unrelated candidate hypothesis', 9)
+    monkeypatch.setattr(repo_research.dedupe, 'find_matches', lambda *a, **kw: [
+        repo_research.dedupe.Match(n, 'prior work', f'https://github.com/org/one/issues/{n}', 'open', False, .8, 'similar') for n in (9,10)])
+    with pytest.raises(repo_research.Invalid, match='possible existing work'):
+        repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    assert not cfg.path('queue.json').exists()
+
+
+def test_adoption_timeline_refusal_still_blocks_handoff(adoption, monkeypatch):
+    cfg, _ = adoption
+    monkeypatch.setattr(repo_research.submit, '_source_work_gate', lambda *a:
+                        (_ for _ in ()).throw(repo_research.submit.Refused('cross-referenced closed PR')))
+    with pytest.raises(repo_research.Invalid, match='activity needs review'):
+        repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    assert not cfg.path('queue.json').exists()

@@ -11,10 +11,11 @@ import hashlib
 import fcntl
 from contextlib import contextmanager
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 from pathlib import Path
 
-from . import acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit
+from . import acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit, vet
 from .queue import Item, Queue, item_id
 from .config import Config
 from . import research_session
@@ -229,13 +230,15 @@ def begin(cfg: Config) -> dict:
     return data['lead']
 
 
-def propose(cfg: Config, path: str, line: int, detail: str) -> dict:
+def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 0) -> dict:
     """An IDE's source-reviewed hypothesis, not a verified bug or publication.
 
-    Deliberately for new code findings only. Existing issue adoption uses the
-    existing fresh vet route; age or textual similarity is not an exemption.
+    Optional issue adoption uses fresh vetting and a minimum 48-hour age.
+    Age or textual similarity is never an exemption from other work/policy gates.
     """
     safety.kill_switch(cfg)
+    if type(source_issue) is not int or source_issue < 0:
+        raise Invalid('source issue must be a nonnegative integer')
     data = load(cfg)
     lead = data['lead']
     if not lead or lead['status'] != 'investigating':
@@ -269,17 +272,48 @@ def propose(cfg: Config, path: str, line: int, detail: str) -> dict:
         tip = gh.api(f"repos/{lead['repo']}/commits/{lead['default_branch']}", fresh=True)
         if tip.get('sha') != lead['revision']:
             raise Invalid('upstream changed during investigation; preserve checkout and refresh before proposing')
+        source = None
+        if source_issue:
+            source = gh.api(f"repos/{lead['repo']}/issues/{source_issue}", fresh=True)
+            if not isinstance(source, dict) or source.get('state') != 'open' or 'pull_request' in source:
+                raise Invalid('source issue is not a confirmed open issue')
+            try:
+                if not isinstance(source.get('created_at'), str):
+                    raise ValueError('missing creation timestamp')
+                created = datetime.fromisoformat(source['created_at'].replace('Z', '+00:00'))
+                if created.tzinfo is None:
+                    raise ValueError('creation timestamp has no timezone')
+                age = (datetime.now(timezone.utc) - created).total_seconds()
+            except (KeyError, ValueError, TypeError) as exc:
+                raise Invalid('source issue creation time unavailable') from exc
+            if age < 48 * 3600:
+                raise Invalid('source issue is younger than 48 hours; preserve investigation without claiming it')
+            verdict = vet.vet_issue(lead['repo'], source_issue, repo_ok=True)
+            if verdict.decision != 'approve':
+                raise Invalid('source issue not eligible: ' + '; '.join(verdict.reasons))
+            try:
+                submit._source_work_gate(Item('adoption-review', lead['repo'], path, line,
+                                             'issue', detail, source_issue=source_issue))
+            except submit.Refused as exc:
+                raise Invalid(f'source issue activity needs review: {exc}') from exc
         matches = dedupe.find_matches(lead['repo'], detail, detail, path, [], strict=True)
+        if source_issue:
+            if not any(m.number == source_issue and not m.is_pr for m in matches):
+                raise Invalid('source issue does not match candidate search evidence; inspect semantic relevance')
+            if source.get('html_url') != f"https://github.com/{lead['repo']}/issues/{source_issue}":
+                raise Invalid('source issue URL identity mismatch')
+            matches = [m for m in matches if m.number != source_issue or m.is_pr]
         commits = dedupe.recent_commit_hits(lead['repo'], path, dedupe.evidence_terms(detail, detail), strict=True)
     if matches or commits:
         raise Invalid('possible existing work needs source review before coding; no automatic duplicate clearance or issue-age exemption')
     queue = Queue(cfg.path('queue.json'))
-    id_ = item_id(lead['repo'], path, 'ide-hypothesis', line)
+    id_ = f"{lead['repo']}#{source_issue}:issue" if source_issue else item_id(lead['repo'], path, 'ide-hypothesis', line)
     if id_ in queue.items:
         raise Invalid('candidate already exists; inspect its current state instead of replacing it')
-    item = Item(id_, lead['repo'], path, line, 'ide-hypothesis', detail.strip(),
+    item = Item(id_, lead['repo'], path, line, 'issue' if source_issue else 'ide-hypothesis', detail.strip(),
                 status='clean', clone=str(root), notes=['IDE source-reviewed hypothesis, not bug proof',
-                                                     lead['revision_url']], snippet=hunt.snippet(root, path, line))
+                                                     lead['revision_url']] + ([source['html_url']] if source else []),
+                source_issue=source_issue, snippet=hunt.snippet(root, path, line))
     queue.add(item)
     queue.save()
     return {'status': 'candidate', 'id': id_, 'warning': 'must check current issues/PRs/commits and reproduce before editing; submit independently rechecks duplicates'}
@@ -299,7 +333,7 @@ def checkpoint(cfg: Config, prefix: list[str]) -> dict:
         data = {**data, 'lead': lead}
     if data['lead'] and data['lead']['status'] == 'investigating':
         return {'schema': 1, 'status': 'repo_investigation', 'local_only': True, 'lead': data['lead'],
-                'next': 'IDE: inspect selected code for a useful defect; research-propose PATH LINE --detail HYPOTHESIS, or research-repo --defer REASON',
+                'next': 'IDE: inspect selected code for a useful defect; research-propose PATH LINE --detail HYPOTHESIS [--source-issue NUMBER], or research-repo --defer REASON',
                 'warning': 'no bug is confirmed; do not edit before current duplicate/claim/policy review and reproduction'}
     return {'schema': 1, 'status': 'repo_research', 'local_only': True,
             'lead': data['lead'], 'next_argv': prefix + ['research-repo'] if not data['lead'] else
