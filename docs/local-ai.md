@@ -422,8 +422,8 @@ star/health thresholds and preferred repositories). They are not assertions that
 upstream can never change. Selection does not wrap back to a deferred repository
 in the same scope; an exhausted current bounded search window returns `repo_pool_exhausted`.
 This is not proof of global exhaustion or that no suitable repository exists.
-Inspect saved reasons before explicitly searching another window; the next
-session-controller stage will expose window advancement. A deliberate selection
+Inspect saved reasons before explicitly searching another window; `research-repo --next-window` explicitly advances to another bounded search
+window without extending the session deadline or clearing rejection history. A deliberate selection
 scope change can permit reassessment, but is not needed as proof of exhaustion. There is no automatic rejection expiry that silently repeats work.
 
 Existing pending issue handoffs, incomplete issue-search journals, qualification

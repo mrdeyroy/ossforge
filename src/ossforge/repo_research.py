@@ -83,7 +83,7 @@ def prepare(cfg: Config) -> dict:
     if len(cfg.languages) != 1:
         raise Invalid('repo-first research requires exactly one configured language')
     with gh.read_budget(research_session.allowance(cfg) if cfg.repo_first else cfg.discovery_read_budget_seconds):
-        pool = discovery.discover_broad_repos(cfg, cfg.languages[0], data['cursor'] // 5)
+        pool = discovery.discover_broad_repos(cfg, cfg.languages[0], data.get('window', data['cursor'] // 5))
         if not pool:
             raise Invalid('repository pool unavailable; cursor unchanged, not proof of no work')
         scope = _selection_scope(cfg)
@@ -104,6 +104,19 @@ def prepare(cfg: Config) -> dict:
         data['lead'] = lead
         _save(cfg, data)
     return refresh(cfg)
+
+
+def next_window(cfg: Config) -> dict:
+    """Explicit continuation within the same budget, never reset rejections."""
+    safety.kill_switch(cfg)
+    research_session.allowance(cfg)
+    data = load(cfg)
+    if data['lead'] or not data.get('exhausted'):
+        raise Invalid('finish or defer the current lead and exhaust its window before advancing')
+    data['window'] = data.get('window', data['cursor'] // 5) + 1
+    data.pop('exhausted', None)
+    _save(cfg, data)
+    return prepare(cfg)
 
 
 def refresh(cfg: Config) -> dict:

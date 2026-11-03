@@ -107,3 +107,21 @@ def test_cli_new_requires_budget_and_stop_blocks_start(tmp_path, capsys):
     (tmp_path/'STOP').touch()
     assert cli.main(['--config', str(cfgfile), 'research-session', '--seconds', '60']) == 1
     assert not (tmp_path/'state'/'research_session.json').exists()
+
+
+def test_next_window_retains_deadline_and_rejections(tmp_path, monkeypatch):
+    from ossforge import repo_research
+    cfg = Config(state_dir=str(tmp_path), repo_first=True)
+    monkeypatch.setattr(session.time, 'time', lambda: 1000.)
+    session.start(cfg, 60)
+    repo_research._save(cfg, {'schema': 1, 'cursor': 2, 'lead': None, 'deferred': [
+        {'repo': 'org/old', 'reason': 'policy', 'scope': repo_research._selection_scope(cfg)}],
+        'exhausted': {'status': 'repo_pool_exhausted'}})
+    monkeypatch.setattr(repo_research, 'prepare', lambda cfg: repo_research.load(cfg))
+    state = repo_research.next_window(cfg)
+    assert state['window'] == 1 and len(state['deferred']) == 1
+    assert session.status(cfg)['deadline'] == 1060
+    monkeypatch.setattr(session.time, 'time', lambda: 1060.)
+    with pytest.raises(session.Invalid, match='exhausted'):
+        repo_research.next_window(cfg)
+    assert repo_research.load(cfg)['window'] == 1
