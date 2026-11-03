@@ -308,3 +308,10 @@ explicitly qualified to another repository. Same-repository, unqualified,
 missing-text and ambiguous hits still require review. Actual timeline links and
 incomplete-coverage refusals remain unchanged. This does not establish that a
 closed PR fixed the issue or permit publishing a competing fix without review.
+
+An explicitly supplied `--config` must name an existing file. A missing path or
+folder is refused before opening workflow state, running remote work or changing
+STOP. This prevents a typo from silently switching to the default state and
+settings. Omitting `--config` on a fresh clone still uses `ossforge.yaml` when
+present, or defaults when it is absent. The direct Python `config.load()` fallback
+is unchanged; this guard applies to explicit public CLI workflow selection.
