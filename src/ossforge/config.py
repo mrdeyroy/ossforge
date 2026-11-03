@@ -40,7 +40,7 @@ class Config:
     patch_command: str = ""           # optional: shell command that drafts a patch for an item JSON
     auto_submit: bool = False         # loop submits verified items itself when true
     spam_keywords: list[str] = field(
-        default_factory=lambda: ["bounty", "airdrop", "giveaway", "eth)", "token", "rtc", "campaign", "reward pool"]
+        default_factory=lambda: ["bounty", "airdrop", "giveaway", "eth)", "rtc", "campaign", "reward pool"]
     )
     cache_ttl_seconds: int = 900
     own_orgs: list[str] = field(default_factory=list)  # orgs whose repos are yours, ignored by `bootstrap`
