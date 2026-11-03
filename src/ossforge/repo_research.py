@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from . import preparation, acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit, vet
+from . import duplicate_reviews, issue_reviews, preparation, acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit, vet
 from .queue import Item, Queue, item_id
 from .config import Config
 from . import research_session, repo_suitability
@@ -364,8 +364,34 @@ def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 
                 raise Invalid('source issue URL identity mismatch')
             matches = [m for m in matches if m.number != source_issue or m.is_pr]
         commits = dedupe.recent_commit_hits(lead['repo'], path, dedupe.evidence_terms(detail, detail), strict=True)
-    if matches or commits:
-        raise Invalid('possible existing work needs source review before coding; no automatic duplicate clearance or issue-age exemption')
+    # Pre-coding review is separate from verified publication duplicate reviews.
+    # Every retry repeats live search, policy, tip and clean-checkout checks above.
+    context = {'repo': lead['repo'], 'base': lead['base'], 'checkout': current,
+               'path': path, 'line': line, 'detail': detail, 'source_issue': source_issue}
+    fingerprint = hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest()
+    prior = issue_reviews.load(cfg.path('research_source_review.json'))
+    hits = {}
+    for match in matches:
+        hits[str(match.number)] = {'url': match.url, 'title': match.title,
+                                  'snapshot': duplicate_reviews.snapshot(lead['repo'], match.number)}
+    for url in commits:
+        prefix = f"https://github.com/{lead['repo']}/commit/"
+        if not url.startswith(prefix):
+            raise Invalid('commit search returned a mismatched repository URL')
+        sha = url[len(prefix):]
+        hits[sha] = {'url': url, 'snapshot': duplicate_reviews.commit_snapshot(lead['repo'], sha)}
+    reviews = prior.get('reviews', {}) if prior.get('fingerprint') == fingerprint else {}
+    pending = {'schema': 1, 'fingerprint': fingerprint, 'context': context,
+               'hits': hits, 'reviews': reviews}
+    issue_reviews._save(cfg.path('research_source_review.json'), pending)
+    unresolved = [key for key, hit in hits.items()
+                  if reviews.get(key, {}).get('snapshot') != hit['snapshot']
+                  or not reviews.get(key, {}).get('reason')]
+    if unresolved:
+        raise Invalid('possible existing work needs source review before coding: ' +
+                      ', '.join(hits[key]['url'] for key in unresolved) +
+                      '; inspect each source, then research-review SOURCE --reason REASON; '
+                      'retry the exact research-propose; no publication clearance')
     queue = Queue(cfg.path('queue.json'))
     id_ = f"{lead['repo']}#{source_issue}:issue" if source_issue else item_id(lead['repo'], path, 'ide-hypothesis', line)
     if id_ in queue.items:
@@ -377,6 +403,41 @@ def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 
     queue.add(item)
     queue.save()
     return {'status': 'candidate', 'id': id_, 'warning': 'must check current issues/PRs/commits and reproduce before editing; submit independently rechecks duplicates'}
+
+
+def review_source(cfg: Config, source: str, reason: str) -> dict:
+    """Record an inspected unrelated source for one exact clean hypothesis only."""
+    safety.kill_switch(cfg)
+    data = load(cfg)
+    lead = data['lead']
+    pending = issue_reviews.load(cfg.path('research_source_review.json'))
+    context = pending.get('context', {})
+    if not lead or lead['status'] != 'investigating' or context.get('repo') != lead['repo']:
+        raise Invalid('no matching active investigation source review')
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 4000:
+        raise Invalid('provide a bounded source-specific unrelated-work reason')
+    hit = pending.get('hits', {}).get(source)
+    if not hit:
+        raise Invalid('source is not a pending exact issue number or full commit SHA')
+    preparation.public_guard(Path(lead['clone']))
+    current = evidence.capture(Path(lead['clone']), lead['base'], [])
+    if current != context.get('checkout') or lead['base'] != context.get('base'):
+        raise Invalid('checkout changed; preserve work and propose again before source review')
+    with gh.read_budget(cfg.discovery_read_budget_seconds):
+        why = policy_review.check(cfg, lead['repo'])
+        if why:
+            raise Invalid(why)
+        if gh.api(f"repos/{lead['repo']}/commits/{lead['default_branch']}", fresh=True).get('sha') != lead['revision']:
+            raise Invalid('upstream changed; refresh investigation before source review')
+        snapshot = (duplicate_reviews.snapshot(lead['repo'], int(source)) if source.isdecimal()
+                    else duplicate_reviews.commit_snapshot(lead['repo'], source))
+    if snapshot != hit['snapshot']:
+        raise Invalid('source changed; repeat research-propose and inspect its current evidence')
+    pending.setdefault('reviews', {})[source] = {'snapshot': snapshot, 'reason': reason.strip()}
+    issue_reviews._save(cfg.path('research_source_review.json'), pending)
+    return {'status': 'research_source_review_recorded', 'source': hit['url'],
+            'warning': 'exact pre-coding hypothesis only; retry research-propose for fresh gates; '
+                       'not bug proof, owner permission or publication duplicate clearance'}
 
 
 def checkpoint(cfg: Config, prefix: list[str]) -> dict:
@@ -391,7 +452,10 @@ def checkpoint(cfg: Config, prefix: list[str]) -> dict:
             lead['policy'] = {**lead['policy'], 'docs': [
                 {k: d[k] for k in ('path', 'url', 'sha')} for d in lead['policy']['docs']]}
         data = {**data, 'lead': lead}
+    review = issue_reviews.load(cfg.path('research_source_review.json'))
     if data['lead'] and data['lead']['status'] == 'investigating':
+        if review.get('context', {}).get('repo') == data['lead']['repo']:
+            data['lead']['source_review'] = review
         return {'schema': 1, 'status': 'repo_investigation', 'local_only': True, 'lead': data['lead'],
                 'next': 'IDE: inspect selected code for a useful defect; research-propose PATH LINE --detail HYPOTHESIS [--source-issue NUMBER], or research-repo --defer REASON',
                 'warning': 'no bug is confirmed; do not edit before current duplicate/claim/policy review and reproduction'}

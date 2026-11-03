@@ -63,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("line", type=int)
     rp.add_argument("--detail", required=True)
     rp.add_argument("--source-issue", type=int, default=0, help="adopt a matching open issue at least 48h old, with fresh eligibility and duplicate checks")
+    rv = add("research-review", "review one exact pre-coding duplicate source; never publication clearance", "source")
+    rv.add_argument("--reason", required=True)
     rr.add_argument("--defer", default="", metavar="REASON")
     add("preparation-task", "show current local-only investigation, never a public queue task")
     pc = add("preparation-commit", "identity-checked local preparation commit")
@@ -177,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     def emit(obj) -> None:
         print(json.dumps(obj, indent=2, default=lambda o: dataclasses.asdict(o) if dataclasses.is_dataclass(o) else str(o)))
 
-    if a.cmd in {"research-repo", "research-propose", "research-session"}:
+    if a.cmd in {"research-repo", "research-propose", "research-session", "research-review"}:
         try:
             with repo_research.locked(cfg):
                 if a.cmd == "research-session":
@@ -185,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
                     if a.new and a.seconds is None:
                         raise research_session.Invalid("--new requires an explicit --seconds budget")
                     result = research_session.start(cfg, a.seconds, new=a.new) if a.seconds is not None else research_session.status(cfg)
+                elif a.cmd == "research-review":
+                    result = repo_research.review_source(cfg, a.source, a.reason)
                 elif a.cmd == "research-propose":
                     result = repo_research.propose(cfg, a.path, int(a.line), a.detail, a.source_issue)
                 else:
