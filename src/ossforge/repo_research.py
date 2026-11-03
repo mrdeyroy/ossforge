@@ -291,6 +291,11 @@ def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 
             verdict = vet.vet_issue(lead['repo'], source_issue, repo_ok=True)
             if verdict.decision != 'approve':
                 raise Invalid('source issue not eligible: ' + '; '.join(verdict.reasons))
+            try:
+                submit._source_work_gate(Item('adoption-review', lead['repo'], path, line,
+                                             'issue', detail, source_issue=source_issue))
+            except submit.Refused as exc:
+                raise Invalid(f'source issue activity needs review: {exc}') from exc
         matches = dedupe.find_matches(lead['repo'], detail, detail, path, [], strict=True)
         if source_issue:
             if not any(m.number == source_issue and not m.is_pr for m in matches):

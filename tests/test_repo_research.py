@@ -228,6 +228,7 @@ def adoption(monkeypatch, tmp_path):
     subprocess.run(['git', 'add', '.'], cwd=root, check=True)
     subprocess.run(['git', 'commit', '-m', 'fixture'], cwd=root, check=True, capture_output=True)
     tip = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+    monkeypatch.setattr(repo_research.submit, '_source_work_gate', lambda *a: None)
     source = {'state': 'open', 'html_url': 'https://github.com/org/one/issues/9',
               'created_at': (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()}
     def api(path, **kw):
@@ -291,5 +292,14 @@ def test_adoption_keeps_other_duplicates_and_requires_match(adoption, monkeypatc
     monkeypatch.setattr(repo_research.dedupe, 'find_matches', lambda *a, **kw: [
         repo_research.dedupe.Match(n, 'prior work', f'https://github.com/org/one/issues/{n}', 'open', False, .8, 'similar') for n in (9,10)])
     with pytest.raises(repo_research.Invalid, match='possible existing work'):
+        repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    assert not cfg.path('queue.json').exists()
+
+
+def test_adoption_timeline_refusal_still_blocks_handoff(adoption, monkeypatch):
+    cfg, _ = adoption
+    monkeypatch.setattr(repo_research.submit, '_source_work_gate', lambda *a:
+                        (_ for _ in ()).throw(repo_research.submit.Refused('cross-referenced closed PR')))
+    with pytest.raises(repo_research.Invalid, match='activity needs review'):
         repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
     assert not cfg.path('queue.json').exists()
