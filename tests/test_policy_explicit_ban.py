@@ -56,3 +56,11 @@ def test_review_result_is_enforced_by_issue_consumer():
     decision, reasons = vet.decide(assigned=False, claimed=False, open_pr_count=0,
         clear=True, has_contributing=True, anti_ai=result, repo_ok=True)
     assert decision == 'skip' and any('policy needs review' in r for r in reasons)
+
+
+def test_permission_or_human_negation_does_not_suppress_separate_universal_ban():
+    ban = 'This project strictly forbids the usage of LLMs, agents, or any other AI tools for any kind of contribution.'
+    for prefix in ('We do not forbid human help. ', 'AI is welcome for brainstorming. ',
+                   'Autonomous agents are not prohibited from opening PRs; however, '):
+        assert policy.scan_text(prefix + ban).anti_ai
+    assert not policy.scan_text('We do not forbid human help. AI contributions are welcome.').agent_review

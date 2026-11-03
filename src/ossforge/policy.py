@@ -68,7 +68,7 @@ def scan_text(text: str, source: str | None = None) -> PolicyResult:
     normalized = [re.sub(r"\s+", " ", re.sub(r"[*_`]", "", block)) for block in blocks]
     # A narrow affirmative directive is decisive. Other AI/restriction wording
     # is evidence to read, not permission or a guessed universal prohibition.
-    for block in normalized:
+    for block in (clause.strip(" ,:") for unit in normalized for clause in re.split(r"[.!?;]+|\bbut\b|\bhowever\b", unit)):
         ai = re.search(r"\b(?:ai|llms?|chatgpt|copilot|claude|gemini|agents?)\b", block)
         restriction = re.search(r"\b(?:forbid\w*|prohibit\w*|ban(?:ned|s)?|not accept\w*|not allowed|no ai|no llm)\b", block)
         if not (ai and restriction):
