@@ -268,6 +268,39 @@ The CLI returns nonzero for held work so automation cannot count it as successfu
 verification. The consumed driver attempt stays counted; later runs do not relaunch
 that held task. Use explicit `unhold` only after its prerequisite is resolved.
 
+### Opt-in repository-scoped sampling experiment
+
+`discovery_sampling: per-repo` changes the issue query from the current five-repo
+pool to one repository per successful subturn. A dominant recently-updated repo
+can no longer occupy every slot for the other pool members. It still makes one
+candidate issue search per pass with the same limit, read budget, pacing and
+quality/competition gates. Vetting may make its normal extra reference searches;
+this is not five parallel candidate searches or permission to poll more often.
+
+Default `combined` is unchanged. `per-repo` uses `scoped_breadth_cursor` (or
+`scoped_cursor` outside breadth-first), initialized from the existing ordinary
+cursor but updated separately. The ordinary repository window advances only in
+its scoped cursor after every member has received a turn. The `scoped_sample`
+index is keyed to strategy, window cursor, language, label and ordered repo pool;
+a changed pool/query category resets that index, while a partial pass retains it.
+Inspect `sampling`, `sample_index`, `repository_pool`, `repos` and `query` in the
+funnel for attribution. With no confirmed pool it refuses unscoped fallback.
+
+The experiment supports exactly one configured language and one label. Multiple
+languages or daily label rotation refuse before remote work, because a shared
+subturn index would otherwise keep resetting and starve the tail of the pool.
+
+Finish saved partial batches with their original config before switching modes.
+A nonempty saved batch belonging to another scope refuses a switch involving
+per-repo mode in either direction, including the legacy broad/combined path.
+This preservation check does not ignore an expired batch. An expired scoped
+batch at its original scope also refuses automatic retry: inspect its saved
+positions and explicitly reconcile it first, never silently drop it. Normal
+combined-to-combined query rotation retains its prior behavior. This experiment guarantees targeted query scope,
+not eligible issue yield or exhaustive search. It still samples only the latest
+issue page and can return zero matches or genuine competing work. Compare actual
+paced run results, not controlled fixtures, before judging contribution yield.
+
 PR text search is only a candidate-reference search. Dependency changelogs can
 contain another repository's identically numbered issue. Vetting and publication
 ignore a hit only when every matching number in its available title/body is

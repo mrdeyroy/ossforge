@@ -47,6 +47,10 @@ def _run_once(cfg: Config, run) -> list[str]:
         run.data["outcome"] = "halted"
         notes.append(f"halted: {e}")
         return notes
+    if cfg.discovery_sampling == "per-repo" and (len(cfg.languages) != 1 or len(cfg.labels) != 1):
+        run.data["outcome"] = "halted"
+        notes.append("halted: per-repo experiment requires exactly one configured language and label; no remote work started")
+        return notes
     gh.configure(cfg.path("cache"), cfg.cache_ttl_seconds)
     q = Queue(cfg.path("queue.json"))
     audit = safety.Audit(cfg.path("audit.jsonl"))
@@ -107,7 +111,7 @@ def _pass(cfg: Config, q: Queue, audit: safety.Audit, stats: Stats, limiter: Dai
                 # one label per pass (rotating) keeps the request burst small; features alternate days
                 label = cfg.labels[day % len(cfg.labels)]
                 notes.append(f"discovery: {lang} / {label} / {cfg.discovery_strategy}")
-                for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" else
+                for c in (scout.scout(cfg, stats, lang, label, 12, skip_repos=blocked) if cfg.discovery_strategy == "broad" and cfg.discovery_sampling == "combined" else
                           discovery.discover(cfg, stats, lang, label, 12, cfg.discovery_strategy, skip_repos=blocked)):
                     if c.verdict.decision == "approve":
                         issues.append(c)
