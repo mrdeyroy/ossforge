@@ -454,3 +454,23 @@ The normal driver/native verification and submit gates remain unchanged. Submit
 reuses and rechecks the original issue URL, rather than creating another issue.
 An assigned/claimed issue, or an old closed/merged reference, needs independent
 source review; this command deliberately does not create a bypass for it.
+
+### Native code-target suitability
+
+A GitHub language tag or star count does not distinguish a code library from a
+curated list. Repository research therefore reads an exact-revision root listing
+and reports manifests, conventional source/test directories, and README
+collection signals. `native_candidate` is a layout hint only, not proof that
+native tests run or a bug exists. Collections can be valid documentation targets;
+this code-bug route must not invent bugs in a resource list to satisfy a quota.
+
+If suitability is unresolved, inspect the source and native test instructions.
+Defer a documentation-only target for this session, or record a nonstandard code
+layout with `research-repo --review-native-source PATH --native-guide GUIDE
+--native-test-command EXEC ARG...`. Read both cited files first. This pins two
+readable implementation/instruction files and the proposed native command to the
+selected revision. It is a review assertion, not proof the command ran and not a
+permission or policy override. A new revision needs a new review. `--begin`
+requires a conventional code layout or this current source-backed feasibility
+review; the normal policy, checkout, duplicate and native verification gates
+remain required.

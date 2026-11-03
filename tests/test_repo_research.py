@@ -11,6 +11,7 @@ def prepare(cfg):
 
 
 def setup_sources(monkeypatch):
+    monkeypatch.setattr(repo_research.repo_suitability, 'assess', lambda *a: {'status': 'native_candidate'})
     monkeypatch.setattr(repo_research.discovery, 'discover_broad_repos', lambda *a: ['org/one', 'org/two'])
     monkeypatch.setattr(repo_research.repo_access, 'pr_restriction', lambda *a: '')
     monkeypatch.setattr(repo_research.radar, 'analyze', lambda r: radar.RepoScore(r, 80, 'Go'))
@@ -303,3 +304,39 @@ def test_adoption_timeline_refusal_still_blocks_handoff(adoption, monkeypatch):
     with pytest.raises(repo_research.Invalid, match='activity needs review'):
         repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
     assert not cfg.path('queue.json').exists()
+
+
+def test_nonstandard_layout_requires_pinned_native_review(monkeypatch, tmp_path):
+    setup_sources(monkeypatch)
+    cfg = Config(state_dir=str(tmp_path/'state'), kill_file=str(tmp_path/'STOP'))
+    monkeypatch.setattr(repo_research.repo_suitability, 'assess', lambda *a:
+                        {'status': 'native_feasibility_review_needed', 'reason': 'nonstandard layout'})
+    repo_research.prepare(cfg)
+    monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: (_ for _ in ()).throw(AssertionError('clone reached')))
+    with pytest.raises(repo_research.Invalid, match='suitability unresolved'):
+        repo_research.begin(cfg)
+    data = repo_research.load(cfg)
+    data['lead']['native_review'] = {'revision': 'stale'}
+    repo_research._save(cfg, data)
+    with pytest.raises(repo_research.Invalid, match='suitability unresolved'):
+        repo_research.begin(cfg)
+
+
+def test_native_review_pins_real_files_and_never_runs_command(monkeypatch, tmp_path):
+    setup_sources(monkeypatch)
+    cfg = Config(state_dir=str(tmp_path/'state'), kill_file=str(tmp_path/'STOP'))
+    repo_research.prepare(cfg)
+    api = repo_research.gh.api
+    def content(path, **kw):
+        if '/contents/' in path:
+            assert kw['ref'] == 'exact-tip'
+            return {'type': 'file', 'sha': 'file-sha', 'html_url': 'observed-file-url'}
+        return api(path, **kw)
+    monkeypatch.setattr(repo_research.gh, 'api', content)
+    monkeypatch.setattr(repo_research.gh, 'file_text', lambda *a, **kw: 'source text reviewed by IDE')
+    review = repo_research.review_native(cfg, 'custom/code.py', 'HACKING.md', ['pytest', 'native'])
+    assert review['revision'] == 'exact-tip' and len(review['sources']) == 2
+    assert review['test_command'] == ['pytest', 'native']
+    assert 'not proof' in review['warning']
+    with pytest.raises(repo_research.Invalid, match='inside'):
+        repo_research.review_native(cfg, '../outside', 'HACKING.md', ['pytest'])
