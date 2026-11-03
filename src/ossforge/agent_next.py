@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from . import preparation, research_session, repo_research, qualification, driver, evidence, submit
+from . import identity, preparation, research_session, repo_research, qualification, driver, evidence, submit
 from .config import Config
 from .queue import Queue
 
@@ -101,7 +101,7 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
             return result('local_preparation' if prep['status'] == 'local_investigation' else 'awaiting_owner_review',
                           preparation=checkpoint, next_argv=prefix + ['preparation-task'],
                           warning='No public queue or submission; source scope still required.')
-    except (ValueError, OSError, evidence.StaleEvidence) as exc:
+    except (ValueError, OSError, evidence.StaleEvidence, identity.IdentityError) as exc:
         return result('inspect_local', reason=str(exc), warning='preserve local preparation before continuing')
     if cfg.repo_first:
         try:

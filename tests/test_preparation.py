@@ -19,6 +19,7 @@ def prepared(tmp_path, monkeypatch):
     git(root, 'init', '-b', 'main')
     git(root, 'config', 'user.name', 'Test')
     git(root, 'config', 'user.email', 'test@example.invalid')
+    (root / '.git' / 'config').write_text((root / '.git' / 'config').read_text() + '\n[remote \"origin\"]\n\turl = https://github.com/org/repo.git\n')
     (root / 'a.py').write_text('def value(): return 0\n')
     git(root, 'add', '.')
     git(root, 'commit', '-m', 'base')
@@ -226,3 +227,16 @@ def test_orphan_completion_refused_before_native_checks(prepared, monkeypatch):
     with pytest.raises(ValueError, match='pinned base'):
         preparation.complete(cfg, {'id': 'local-preparation:org/repo'})
     assert not cfg.path('local-preparation-artifacts').exists()
+
+
+def test_actual_origin_mismatch_refuses_task_and_completion(prepared, monkeypatch):
+    from ossforge import identity, agent_next, verify
+    cfg, root, base, snap = prepared
+    conf = root / '.git' / 'config'
+    conf.write_text(conf.read_text().replace('https://github.com/org/repo.git', 'https://github.com/wrong/target.git'))
+    monkeypatch.setattr(verify, 'verify_fix', lambda *a, **kw: pytest.fail('native reached'))
+    with pytest.raises(identity.IdentityError, match='clone origin'):
+        preparation.task(cfg)
+    with pytest.raises(identity.IdentityError, match='clone origin'):
+        preparation.complete(cfg, {'id': 'local-preparation:org/repo'})
+    assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg.yml')['status'] == 'inspect_local'

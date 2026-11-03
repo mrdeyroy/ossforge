@@ -103,7 +103,8 @@ def task(cfg):
     record = _load(cfg)
     if not record:
         return {'status': 'no_local_preparation'}
-    from . import policy_review
+    from . import policy_review, identity
+    identity.require(identity.check_upstream(record['clone'], record['repo']))
     if not policy_review.preparation_review(cfg, record['repo'], policy_review.snapshot(
             record['repo'], extra_paths=record['policy_review'].get('extra_paths', []))):
         raise ValueError('local preparation policy changed or scope unresolved; preserve work')
@@ -159,7 +160,7 @@ def complete(cfg, result):
     if result.get('outcome') == 'hold' or result['base'] != record['base']:
         raise ValueError('preparation result needs the pinned base and a patch proposal')
     root = Path(record['clone'])
-    identity.require(identity.check_login(cfg) + identity.check_worktree(cfg, str(root), record['base']))
+    identity.require(identity.check_upstream(str(root), record['repo']) + identity.check_login(cfg) + identity.check_worktree(cfg, str(root), record['base']))
     current = evidence.capture(root, record['base'], [])
     if current['branch'] != result['branch']:
         raise ValueError('result branch differs from preparation checkout')
@@ -169,7 +170,7 @@ def complete(cfg, result):
     if not outcome.ok:
         return {'status': 'local_verification_failed', 'log': outcome.log, 'publication_hold': True}
     evidence.check(root, record['base'], result['branch'], outcome.evidence)
-    identity.require(identity.check_login(cfg) + identity.check_worktree(cfg, str(root), record['base']))
+    identity.require(identity.check_upstream(str(root), record['repo']) + identity.check_login(cfg) + identity.check_worktree(cfg, str(root), record['base']))
     patch = subprocess.run(['git', 'diff', '--binary', record['base'], 'HEAD'], cwd=root,
                            capture_output=True, check=True).stdout
     artifacts = cfg.path('local-preparation-artifacts')
