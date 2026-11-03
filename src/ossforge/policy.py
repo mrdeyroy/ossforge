@@ -56,15 +56,16 @@ class PolicyResult:
 
 def scan_text(text: str, source: str | None = None) -> PolicyResult:
     # Markdown emphasis must not hide literal prohibitions such as **no**.
-    hay = re.sub(r"[*_`]", "", (text or "").lower())
+    raw = (text or "").lower()
+    hay = re.sub(r"[*_`]", "", raw)
     hits = [k for k in ANTI_AI_KEYWORDS if k in hay]
     reviews = []
     # Join ordinary Markdown line wraps, then isolate contrast clauses so a
     # permission about human assistance cannot negate an agent restriction.
     # Paragraphs, headings and list items are independent evidence units.
     # Join only soft wraps within a unit, never unrelated Markdown blocks.
-    blocks = re.split(r"\n\s*\n|\n(?=\s*(?:[-+*] |\d+[.)] |#{1,6} ))", hay)
-    normalized = [re.sub(r"\s+", " ", block) for block in blocks]
+    blocks = re.split(r"\n\s*\n|\n(?=\s*(?:[-+*] |\d+[.)] |#{1,6} ))", raw)
+    normalized = [re.sub(r"\s+", " ", re.sub(r"[*_`]", "", block)) for block in blocks]
     for sentence in (clause for block in normalized
                      for clause in re.split(r"[.!?;]+|\bbut\b|\bhowever\b", block)):
         # This is a review signal, not a global AI ban or a permission parser.

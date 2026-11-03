@@ -154,3 +154,10 @@ def test_unrelated_markdown_blocks_do_not_create_synthetic_restriction():
 def test_wrapped_restriction_within_markdown_item_still_holds():
     result = policy.scan_text('- Autonomous agents should not\n  submit PRs or issues.\n- Human assistance is welcome.')
     assert result.agent_review and not result.anti_ai
+
+
+def test_star_markdown_items_remain_separate_before_emphasis_stripping():
+    result = policy.scan_text('* Code agents should not use global variables\n* Issues are tracked on GitHub')
+    assert not result.agent_review and not result.anti_ai
+    wrapped = policy.scan_text('* **Autonomous agents** should not\n  submit PRs or issues.\n* Human assistance is welcome.')
+    assert wrapped.agent_review and not wrapped.anti_ai
