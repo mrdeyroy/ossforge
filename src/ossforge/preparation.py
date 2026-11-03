@@ -63,7 +63,7 @@ def _save(cfg, record):
     path = cfg.path('local_preparation.json')
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix('.tmp')
-    record = {k: v for k, v in record.items() if k not in {'result_schema', 'next', 'warning'}}
+    record = {k: v for k, v in record.items() if k not in {'result_schema', 'next', 'warning', 'policy_freshness', 'policy_warning'}}
     tmp.write_text(json.dumps(record, indent=2))
     tmp.replace(path)
 

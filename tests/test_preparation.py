@@ -75,6 +75,9 @@ def test_native_verification_stays_outside_public_queue(prepared, monkeypatch):
     result['check_commands'] = [[sys.executable, '-c', 'pass']]
     out = preparation.complete(cfg, result)
     assert out['status'] == 'awaiting_owner_review' and out['publication_hold']
+    import json
+    saved = json.loads(cfg.path('local_preparation.json').read_text())
+    assert 'policy_freshness' not in saved and 'policy_warning' not in saved
     assert out['verification']['failed_without_fix'] and out['verification']['passed_with_fix']
     assert Path(out['artifacts'], 'change.patch').read_text().startswith('diff --git')
     assert not Queue(cfg.path('queue.json')).items
@@ -285,3 +288,15 @@ def test_local_checkpoint_preserves_invalid_saved_scope_hold(prepared):
     from ossforge import agent_next
     policy_review.record(cfg, 'org/repo', snap, 'local scope no longer approved', local_preparation='forbidden')
     assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')['status'] == 'inspect_local'
+
+
+def test_transient_policy_freshness_is_not_saved(prepared):
+    cfg, root, base, snap = prepared
+    fresh = preparation.task(cfg)
+    assert fresh['policy_freshness'] == 'checked_current'
+    preparation._save(cfg, fresh)
+    saved = preparation._load(cfg)
+    assert 'policy_freshness' not in saved and 'policy_warning' not in saved
+    local = preparation.task(cfg, refresh_policy=False)
+    preparation._save(cfg, local)
+    assert 'policy_freshness' not in preparation._load(cfg)
