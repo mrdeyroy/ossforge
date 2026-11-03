@@ -103,6 +103,10 @@ def test_real_cli_checkpoint_config_stop_and_no_network(tmp_path):
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
     assert out['status'] == 'no_work' and str(cfg) in out['next_argv']
+    p = subprocess.run([*entry, '--config', str(cfg), 'agent-next', '--scope', 'research'],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 1 and 'REFUSED: research checkpoint scope requires' in p.stderr
+    assert 'Traceback' not in p.stderr
 
 
 def test_no_work_honors_recorded_cooldown_without_search(tmp_path, monkeypatch):

@@ -248,3 +248,11 @@ def test_actual_origin_mismatch_refuses_task_and_completion(prepared, monkeypatc
     with pytest.raises(identity.IdentityError, match='clone origin'):
         preparation.complete(cfg, {'id': 'local-preparation:org/repo'})
     assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg.yml')['status'] == 'inspect_local'
+
+
+def test_distinct_preparation_does_not_overwrite_preserved_journal(prepared):
+    cfg, root, base, snap = prepared
+    before = cfg.path('local_preparation.json').read_bytes()
+    with pytest.raises(ValueError, match='never overwrite'):
+        preparation.begin(cfg, {'repo': 'other/repo', 'revision': base}, {})
+    assert cfg.path('local_preparation.json').read_bytes() == before
