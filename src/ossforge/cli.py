@@ -180,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         'preparation-commit', 'preparation-verify', 'prepare', 'commit', 'audit', 'hunt',
         'agent-run', 'agent-verify', 'verify', 'hold', 'unhold', 'reject',
         'review-duplicate', 'review-commit-match', 'review-issue', 'reconsider-issue',
-        'submit', 'post-critique', 'loop', 'digest', 'discover'}
+        'submit', 'post-critique', 'loop', 'digest', 'discover', 'scout', 'features', 'patrol'}
     mutating = mutating or (a.cmd == 'research-session' and a.seconds is not None)
     mutating = mutating or (a.cmd == 'policy-review' and (a.accept or a.prohibited))
     mutating = mutating or (a.cmd == 'review-qualification' and bool(a.defer))
@@ -190,7 +190,15 @@ def main(argv: list[str] | None = None) -> int:
         except safety.Blocked as exc:
             print(f"REFUSED: {exc}", file=sys.stderr)
             return 1
-    q, audit, stats, limiter = _ctx(cfg)
+    if a.cmd == 'agent-next' and Path(cfg.kill_file).exists():
+        print(json.dumps({'schema': 1, 'status': 'stopped', 'local_only': True,
+                          'reason': 'kill switch is set; preserve state and wait for the owner'}))
+        return 0
+    try:
+        q, audit, stats, limiter = _ctx(cfg)
+    except (ValueError, OSError) as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
     if getattr(a, "id", None) is not None and a.id not in q.items:
         print(f"unknown queue id {a.id!r}. Run `queue` to list ids.", file=sys.stderr)
         return 2
@@ -202,7 +210,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             with repo_research.locked(cfg):
                 if a.cmd == "research-session":
-                    safety.kill_switch(cfg)
+                    if a.seconds is not None:
+                        safety.kill_switch(cfg)
                     if a.new and a.seconds is None:
                         raise research_session.Invalid("--new requires an explicit --seconds budget")
                     result = research_session.start(cfg, a.seconds, new=a.new) if a.seconds is not None else research_session.status(cfg)
@@ -229,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd in {"preparation-task", "preparation-commit", "preparation-verify"}:
         try:
             with repo_research.locked(cfg):
-                safety.kill_switch(cfg)
+                if a.cmd != 'preparation-task':
+                    safety.kill_switch(cfg)
                 result = (preparation.task(cfg) if a.cmd == "preparation-task" else
                           preparation.commit(cfg, a.message) if a.cmd == "preparation-commit" else
                           preparation.complete(cfg, driver.parse(Path(a.result_file))))

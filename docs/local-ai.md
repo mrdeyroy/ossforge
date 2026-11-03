@@ -597,6 +597,11 @@ changed or invalid local receipts still stop the checkpoint for inspection.
 Direct mutating CLI workflow commands check STOP before loading queue state or
 starting work, even if the assistant skips `agent-next`. This includes native
 verification, commit/prepare, queue decisions, research writes, discovery and
-publication. Read-only inspection and explicit `resume` remain available.
+publication. Read-only inspection and explicit `resume` remain available. `scout`, `features`
+and `patrol` also update discovery or outcome state, so STOP blocks them even
+though they do not send public messages. `research-session` without a new budget
+and `preparation-task` remain status views. A stopped `agent-next` is available
+even if the queue is corrupt; direct `queue` inspection refuses corrupt state
+without a traceback or resetting it.
 STOP is a command-entry guard, not a sandbox or a guarantee that an already
 running native subprocess is interrupted; preserve its state before resuming.

@@ -26,7 +26,8 @@ def test_stop_and_resume_ignore_corrupt_unrelated_queue(tmp_path):
     ['research-repo', '--defer', 'hold'], ['research-session', '--seconds', '60'],
     ['policy-review', 'org/repo', '--accept', '--note', 'reviewed'],
     ['review-qualification', 'org/repo', '1', '--defer', 'hold'],
-    ['submit', 'missing', '--yes'], ['loop', '--once'], ['discover'], ['bootstrap'], ['digest']])
+    ['submit', 'missing', '--yes'], ['loop', '--once'], ['discover'], ['bootstrap'], ['digest'],
+    ['patrol'], ['scout'], ['features']])
 def test_direct_mutating_commands_stop_before_state_or_execution(tmp_path, monkeypatch, capsys, args):
     state = tmp_path / 'state'
     state.mkdir()
@@ -50,4 +51,32 @@ def test_read_only_queue_remains_available_under_stop(tmp_path, capsys):
     cfg.write_text(f'state_dir: {state}\nkill_file: {stop}\n')
     assert cli.main(['--config', str(cfg), '--json', 'queue']) == 0
     assert capsys.readouterr().out.strip() == '[]'
+    assert stop.exists()
+
+
+def test_stopped_checkpoint_precedes_corrupt_queue_and_queue_refuses_cleanly(tmp_path, capsys):
+    state = tmp_path / 'state'
+    state.mkdir()
+    (state / 'queue.json').write_text('{broken')
+    stop = tmp_path / 'STOP'
+    stop.touch()
+    cfg = tmp_path / 'config.yaml'
+    cfg.write_text(f'state_dir: {state}\nkill_file: {stop}\n')
+    assert cli.main(['--config', str(cfg), 'agent-next']) == 0
+    assert 'stopped' in capsys.readouterr().out
+    assert cli.main(['--config', str(cfg), 'queue']) == 1
+    captured = capsys.readouterr()
+    assert 'REFUSED:' in captured.err and 'Traceback' not in captured.err
+    assert (state / 'queue.json').read_text() == '{broken'
+
+
+@pytest.mark.parametrize('args', [['research-session'], ['preparation-task']])
+def test_read_status_available_under_stop(tmp_path, capsys, args):
+    state = tmp_path / 'state'
+    stop = tmp_path / 'STOP'
+    stop.touch()
+    cfg = tmp_path / 'config.yaml'
+    cfg.write_text(f'state_dir: {state}\nkill_file: {stop}\n')
+    assert cli.main(['--config', str(cfg), *args]) == 0
+    assert 'kill switch' not in capsys.readouterr().err
     assert stop.exists()
