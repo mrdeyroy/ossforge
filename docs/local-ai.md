@@ -577,3 +577,11 @@ scope before routing or source-review reads. Invalid timing, changed config or
 an unreadable record stops for inspection without resetting anything. Expiry by
 itself does not discard work or renew the allowance. Legacy investigations with
 no session record stay inspectable; that absence does not permit new search.
+
+A policy-reviewed coding route is not fixed forever by `research-repo --begin`.
+`research-propose` and pre-coding `research-review` recheck the current pinned
+route as well. A later `issue_first`, `unresolved` or missing route stops before
+source-review reads or candidate creation. Resolve its real prerequisite and
+reread current rules; a saved investigation is not permission to bypass it.
+Ordinary `issue_pr` and `pr_only` routes retain their existing behavior, and
+publication still performs its own fresh checks.

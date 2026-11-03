@@ -290,6 +290,16 @@ def begin(cfg: Config) -> dict:
     return data['lead']
 
 
+
+def _coding_route(cfg: Config, repo: str) -> None:
+    """Fresh source-reviewed prerequisite; not owner publication authority."""
+    try:
+        route = policy_review.publication_route(cfg, repo)
+    except ValueError as exc:
+        raise Invalid(str(exc)) from exc
+    if route not in {'issue_pr', 'pr_only'}:
+        raise Invalid('contribution discussion/permission prerequisite unresolved; no coding investigation')
+
 def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 0) -> dict:
     """An IDE's source-reviewed hypothesis, not a verified bug or publication.
 
@@ -324,6 +334,7 @@ def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 
     why = policy_review.check(cfg, lead['repo'])
     if why:
         raise Invalid(why)
+    _coding_route(cfg, lead['repo'])
     blocked = safety.repo_allowed(cfg, lead['repo'], safety.effective_history(safety.Audit(cfg.path('audit.jsonl')).read()))
     if blocked:
         raise Invalid(blocked)
@@ -456,6 +467,7 @@ def review_source(cfg: Config, source: str, reason: str) -> dict:
         why = policy_review.check(cfg, lead['repo'])
         if why:
             raise Invalid(why)
+        _coding_route(cfg, lead['repo'])
         if gh.api(f"repos/{lead['repo']}/commits/{lead['default_branch']}", fresh=True).get('sha') != lead['revision']:
             raise Invalid('upstream changed; refresh investigation before source review')
         snapshot = (_source_snapshot(lead['repo'], int(source)) if source.isdecimal()
