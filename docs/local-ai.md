@@ -569,3 +569,11 @@ while using the same active state directory or strip fields to bypass that
 refusal. Keep a pre-upgrade backup for rollback, and reconcile any remote effects
 before restoring an older snapshot. A backup may predate a real submission;
 restoring it is not permission to publish again.
+
+An existing repo investigation may continue after its search allowance expires,
+but a recorded session must still be readable and match the selected config.
+`agent-next`, `research-propose` and `research-review` validate that recorded
+scope before routing or source-review reads. Invalid timing, changed config or
+an unreadable record stops for inspection without resetting anything. Expiry by
+itself does not discard work or renew the allowance. Legacy investigations with
+no session record stay inspectable; that absence does not permit new search.

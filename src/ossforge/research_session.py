@@ -89,3 +89,13 @@ def allowance(cfg: Config) -> float:
     if state['status'] != 'search_session_active':
         raise Invalid(state['status'])
     return min(cfg.discovery_read_budget_seconds, state['remaining_seconds'])
+
+
+def validate_existing(cfg: Config) -> None:
+    """Validate recorded scope/integrity without requiring remaining search time.
+
+    Legacy investigations may have no session record. This never starts one or
+    authorizes a new search; allowance() still owns new repository reads.
+    """
+    if cfg.repo_first and load(cfg) is not None:
+        status(cfg)

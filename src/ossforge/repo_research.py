@@ -297,6 +297,7 @@ def propose(cfg: Config, path: str, line: int, detail: str, source_issue: int = 
     Age or textual similarity is never an exemption from other work/policy gates.
     """
     safety.kill_switch(cfg)
+    research_session.validate_existing(cfg)
     if type(source_issue) is not int or source_issue < 0:
         raise Invalid('source issue must be a nonnegative integer')
     data = load(cfg)
@@ -430,6 +431,7 @@ def _source_snapshot(repo: str, number: int) -> dict:
 def review_source(cfg: Config, source: str, reason: str) -> dict:
     """Record an inspected unrelated source for one exact clean hypothesis only."""
     safety.kill_switch(cfg)
+    research_session.validate_existing(cfg)
     data = load(cfg)
     lead = data['lead']
     pending = issue_reviews.load(cfg.path('research_source_review.json'))
