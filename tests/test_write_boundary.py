@@ -858,3 +858,33 @@ def test_source_publication_rechecks_complete_unresolved_discussion(world, activ
     with pytest.raises(submit.Refused, match='coverage|resolved'):
         run(world, True)
     assert writes(world['log']) == []
+
+
+@pytest.mark.parametrize('status', ['held', 'rejected', 'clean'])
+def test_stale_verified_submit_cannot_publish_after_queue_status_changes(world, status):
+    q = queue.Queue(world['cfg'].path('queue.json'))
+    import copy
+    changed = copy.deepcopy(world['it'])
+    changed.status = status
+    changed.hold_reason = 'operator paused qualification' if status == 'held' else ''
+    q.add(changed)
+    q.save()
+    with pytest.raises(submit.Refused, match='queue|status|changed'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+    assert queue.Queue(q.path).items[changed.id].status == status
+
+
+@pytest.mark.parametrize('field,value', [('pr_body', 'new reviewed words'), ('repo', 'other/lib'),
+                                        ('verification', {'schema': 1, 'tree': 'new'})])
+def test_stale_verified_submit_cannot_publish_changed_proposal(world, field, value):
+    import copy
+    q = queue.Queue(world['cfg'].path('queue.json'))
+    changed = copy.deepcopy(world['it'])
+    setattr(changed, field, value)
+    q.add(changed)
+    q.save()
+    with pytest.raises(submit.Refused, match='proposal or verification changed'):
+        run(world, execute=True)
+    assert writes(world['log']) == []
+    assert getattr(queue.Queue(q.path).items[changed.id], field) == value

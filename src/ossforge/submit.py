@@ -292,6 +292,12 @@ def submit(it: Item, limiter: DailyLimiter, cfg: Config, audit: safety.Audit, ex
             q = Queue(cfg.path("queue.json"))
             stored = q.items.get(it.id)
             if stored:
+                if stored.status not in ("verified", "submitted"):
+                    raise Refused(f"queue status changed to {stored.status!r}; reload and review before publishing")
+                fields = ("repo", "clone", "branch", "source_issue", "consent_issue", "work", "path", "kind",
+                          "issue_title", "issue_body", "pr_title", "pr_body", "verification")
+                if any(getattr(it, field) != getattr(stored, field) for field in fields):
+                    raise Refused("queue proposal or verification changed; reload and review before publishing")
                 it.submitted = dict(stored.submitted)
                 if stored.status == "submitted":
                     it.status = "verified"  # recheck gates, then return saved URLs without new writes
