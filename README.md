@@ -572,7 +572,14 @@ extend it. After exhaustion, choose a new session explicitly with
 are not a whole-contribution timeout. Search has no background scheduler.
 `agent-next` then selects a repository-research checkpoint independently of open
 issue search, using `research-repo`, policy-reviewed `research-repo --begin`, and
-`research-propose PATH LINE --detail ...`. The IDE AI investigates code and owns
+`research-propose PATH LINE --detail ...`. If fresh duplicate or recent-commit searches find possible prior work,
+proposal stops before coding and saves exact source URLs in the research checkpoint.
+Inspect each issue/PR discussion or commit diff, then record an unrelated-work reason
+with `research-review ISSUE_NUMBER_OR_FULL_COMMIT_SHA --reason ...` and retry the
+identical `research-propose`. Every retry rechecks current sources, policy, tip and
+clean checkout. Reviews are pinned to that hypothesis, checkout and source snapshot;
+changed/new evidence holds again. These pre-coding reviews do not confirm a bug,
+authorize publication, or replace the separate verified-candidate duplicate reviews. The IDE AI investigates code and owns
 semantic diagnosis; finite static `hunt` hints are optional, not bug proof.
 See [the repo-first flow](docs/local-ai.md#repo-first-investigation-staged-opt-in)
 for evidence limits and prerequisites. Existing local work, STOP, reconciliation
