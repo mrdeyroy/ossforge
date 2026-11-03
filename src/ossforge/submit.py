@@ -12,7 +12,7 @@ import fcntl
 from collections.abc import Callable
 from pathlib import Path
 
-from . import repo_access, duplicate_reviews, admission, evidence, contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet, predictor
+from . import references, repo_access, duplicate_reviews, admission, evidence, contributing, dedupe, gh, identity, policy, policy_review, review, safety, vet, predictor
 from .config import Config
 from .limiter import DailyLimiter
 from .queue import Item
@@ -160,6 +160,7 @@ def _source_work_gate(it: Item) -> None:
         if source.get("assignees") or any(vet.comment_claims_issue(c.get("body", "")) for c in comments):
             raise Refused("source issue assigned or claimed; review active work before publication")
         linked = [e.get("source", {}).get("issue", {}) for e in timeline if e.get("event") == "cross-referenced"]
+        refs = [r for r in refs if references.may_reference(r, it.repo, number)]
         if any("pull_request" in r for r in refs + linked):
             raise Refused("source issue has a referenced PR (open/draft/closed); review competing or completed work")
     except gh.GhError as exc:

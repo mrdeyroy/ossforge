@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from . import contributing, gh, policy, repo_access
+from . import contributing, gh, policy, references, repo_access
 
 CLAIM_RE = re.compile(
     r"(i'?m (working|taking)|i'?ll (take|work|do|fix|submit)|working on (this|it)|"
@@ -136,6 +136,7 @@ def vet_issue(repo: str, number: int, repo_ok: bool = True) -> Verdict:
         raise
     except gh.GhError as exc:
         return Verdict(f"{repo}#{number}", "skip", [f"referenced PR coverage unavailable; review activity before coding: {exc}"])
+    prs = [pr for pr in prs if references.may_reference(pr, repo, number)]
     if any(pr.get("state") != "open" for pr in prs):
         return Verdict(f"{repo}#{number}", "skip", ["closed or merged PR reference requires review of implementation and current source before coding"])
     files = policy_texts(repo)
