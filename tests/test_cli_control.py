@@ -21,7 +21,7 @@ def test_stop_and_resume_ignore_corrupt_unrelated_queue(tmp_path):
 @pytest.mark.parametrize('args', [
     ['agent-verify', 'result.json'], ['verify', 'missing', '--branch', 'fix', '--issue-title', 'bug',
      '--issue-body-file', 'issue.txt', '--pr-title', 'fix', '--pr-body-file', 'pr.txt'],
-    ['prepare', 'missing'], ['commit', 'missing', '-m', 'fix'], ['hunt', 'org/repo'],
+    ['prepare', 'missing'], ['commit', 'missing', '-m', 'fix'], ['hunt', 'org/repo'], ['audit', 'org/repo'],
     ['hold', 'missing', '--reason', 'hold'], ['unhold', 'missing'], ['reject', 'missing'],
     ['research-repo', '--defer', 'hold'], ['research-session', '--seconds', '60'],
     ['policy-review', 'org/repo', '--accept', '--note', 'reviewed'],

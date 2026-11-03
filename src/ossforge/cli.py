@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     # Keep read-only inspection and explicit emergency resume available.
     mutating = a.cmd in {
         'bootstrap', 'research-repo', 'research-propose', 'research-review',
-        'preparation-commit', 'preparation-verify', 'prepare', 'commit', 'hunt',
+        'preparation-commit', 'preparation-verify', 'prepare', 'commit', 'audit', 'hunt',
         'agent-run', 'agent-verify', 'verify', 'hold', 'unhold', 'reject',
         'review-duplicate', 'review-commit-match', 'review-issue', 'reconsider-issue',
         'submit', 'post-critique', 'loop', 'digest', 'discover'}
