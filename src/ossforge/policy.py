@@ -66,13 +66,21 @@ def scan_text(text: str, source: str | None = None) -> PolicyResult:
     # Join only soft wraps within a unit, never unrelated Markdown blocks.
     blocks = re.split(r"\n\s*\n|\n(?=\s*(?:[-+*] |\d+[.)] |#{1,6} ))", raw)
     normalized = [re.sub(r"\s+", " ", re.sub(r"[*_`]", "", block)) for block in blocks]
-    # Explicit blanket contribution bans can list tools rather than use the
-    # hyphenated "AI-generated" vocabulary. Keep the verb affirmative; a quoted
-    # policy title or "do not forbid" is not enough.
+    # A narrow affirmative directive is decisive. Other AI/restriction wording
+    # is evidence to read, not permission or a guessed universal prohibition.
     for block in normalized:
-        ban = re.search(r"\b(?:this (?:project|repository|repo) )?(?:strictly )?forbids the (?:usage|use) of (?:llms?|ai tools?)\b", block)
-        if ban and re.search(r'\bfor (?:any kind of |all |any )?(?:contributions?|issues?|patches|pull requests)\b', block) and not re.search(r"\b(?:not|never|doesn't|do not|does not)\s+(?:strictly\s+)?$", block[:ban.start()]):
-            hits.append(ban.group(0))
+        ai = re.search(r"\b(?:ai|llms?|chatgpt|copilot|claude|gemini|agents?)\b", block)
+        restriction = re.search(r"\b(?:forbid\w*|prohibit\w*|ban(?:ned|s)?|not accept\w*|not allowed|no ai|no llm)\b", block)
+        if not (ai and restriction):
+            continue
+        uncertain = bool(re.search(r"[\"'>]|\b(?:if|would|could|might|hypothetical|example|quoted|other projects?|license|attestation|not forbid|not prohibit|do not forbid|does not forbid)\b", block))
+        decisive = re.fullmatch(
+            r"(?:this (?:project|repository|repo) )?(?:strictly )?forbids the (?:usage|use) of "
+            r"(?:llms?|ai tools?)[^.]* for (?:any kind of |all |any )?(?:contributions?|issues?|patches|pull requests)\.?", re.sub(r"^#{1,6} no ai / no llm policy\s+", "", block.strip()))
+        if decisive and not uncertain:
+            hits.append(decisive.group(0))
+        else:
+            reviews.append(block.strip()[:400])
     for sentence in (clause for block in normalized
                      for clause in re.split(r"[.!?;]+|\bbut\b|\bhowever\b", block)):
         # This is a review signal, not a global AI ban or a permission parser.
