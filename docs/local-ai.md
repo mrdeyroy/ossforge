@@ -436,3 +436,20 @@ reviews and held work remain visible before new repo-first research. Held work
 and qualification review checkpoints offer an explicit independent
 `research-repo` command, so an unresolved hold does not require unholding it to
 search elsewhere. This does not mark old work complete or overwrite its records.
+### Existing issue adoption from a code finding
+
+When current-code investigation finds a defect with a matching open issue, use
+`research-propose PATH LINE --detail "specific code hypothesis" --source-issue N`.
+The issue must be at least 48 hours old. The tool refreshes eligibility: current
+open issue, complete discussion, no claims or assignment, no open or closed PR
+references, no policy or contribution prerequisite. It requires the issue to
+appear in strict candidate duplicate evidence, and only excludes that exact issue
+from possible duplicates. Other matching issues/PRs and recent commits still
+hold the proposal. Matching text and elapsed time are not proof of a bug, a grant
+of maintainer permission, or semantic equivalence. Inspect the original issue
+and code and reproduce it before editing. Do not post a new duplicate issue.
+
+The normal driver/native verification and submit gates remain unchanged. Submit
+reuses and rechecks the original issue URL, rather than creating another issue.
+An assigned/claimed issue, or an old closed/merged reference, needs independent
+source review; this command deliberately does not create a bypass for it.
