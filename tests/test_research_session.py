@@ -143,3 +143,36 @@ def test_exhaustion_short_circuits_plain_prepare_despite_search_churn(tmp_path, 
     step = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'chosen.yml')
     assert step['status'] == 'repo_pool_exhausted'
     assert step['next_argv'] == ['ossforge', '--config', 'chosen.yml', 'research-repo', '--next-window']
+
+
+@pytest.mark.parametrize('failure', ['config', 'corrupt'])
+def test_existing_investigation_checkpoint_checks_recorded_session(tmp_path, monkeypatch, failure):
+    from ossforge import agent_next, repo_research
+    from ossforge.queue import Queue
+    cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'), repo_first=True)
+    monkeypatch.setattr(session.time, 'time', lambda: 1000.)
+    session.start(cfg, 60)
+    monkeypatch.setattr(repo_research, 'load', lambda *a: {'lead': {'status': 'investigating'}})
+    monkeypatch.setattr(repo_research, 'checkpoint', lambda *a: pytest.fail('invalid scope cannot route work'))
+    if failure == 'config':
+        cfg.min_stars += 1
+    else:
+        cfg.path('research_session.json').write_text('{broken')
+    before = cfg.path('research_session.json').read_bytes()
+    out = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')
+    assert out['status'] == 'inspect_local'
+    assert cfg.path('research_session.json').read_bytes() == before
+
+
+def test_expired_existing_investigation_still_routes_without_renewal(tmp_path, monkeypatch):
+    from ossforge import agent_next, repo_research
+    from ossforge.queue import Queue
+    cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'), repo_first=True)
+    monkeypatch.setattr(session.time, 'time', lambda: 1000.)
+    session.start(cfg, 60)
+    before = cfg.path('research_session.json').read_bytes()
+    monkeypatch.setattr(session.time, 'time', lambda: 1061.)
+    monkeypatch.setattr(repo_research, 'load', lambda *a: {'lead': {'status': 'investigating'}})
+    monkeypatch.setattr(repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
+    assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')['status'] == 'repo_investigation'
+    assert cfg.path('research_session.json').read_bytes() == before

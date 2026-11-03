@@ -56,8 +56,9 @@ def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default
                       next_argv=prefix + ["agent-task", "--item", task["id"]])
     if cfg.repo_first:
         try:
+            research_session.validate_existing(cfg)
             lead = repo_research.load(cfg)['lead']
-        except repo_research.Invalid as exc:
+        except (repo_research.Invalid, research_session.Invalid) as exc:
             return result('inspect_local', reason=str(exc))
         completed = [i for i in queue.items.values()
                      if lead and lead.get('status') == 'investigating'

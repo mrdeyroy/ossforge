@@ -566,3 +566,28 @@ def test_controlled_public_commands_bind_new_investigation_through_submission(tm
     assert out['completed'][0]['saved_pr'] == 'https://example.invalid/pull/2'
     assert Queue(state / 'queue.json').items[proposed['id']].status == 'submitted'
     assert repo_research.load(Config(state_dir=str(state)))['lead']['research_id'] == begun['research_id']
+
+
+@pytest.mark.parametrize('action', ['propose', 'review'])
+def test_direct_investigation_commands_refuse_drift_before_remote(adoption, monkeypatch, action):
+    cfg, _ = adoption
+    before = cfg.path('research_session.json').read_bytes()
+    cfg.min_stars += 1
+    monkeypatch.setattr(repo_research.gh, 'api', lambda *a, **kw: pytest.fail('no remote read on scope drift'))
+    with pytest.raises(research_session.Invalid, match='configuration changed'):
+        if action == 'propose':
+            repo_research.propose(cfg, 'source.py', 1, 'controlled scope drift hypothesis', 9)
+        else:
+            repo_research.review_source(cfg, '9', 'controlled unrelated source')
+    assert cfg.path('research_session.json').read_bytes() == before
+    assert not cfg.path('queue.json').exists()
+
+
+def test_expired_session_still_allows_source_proposal_without_renewal(adoption, monkeypatch):
+    cfg, _ = adoption
+    before = cfg.path('research_session.json').read_bytes()
+    deadline = research_session.load(cfg)['deadline']
+    monkeypatch.setattr(research_session.time, 'time', lambda: deadline + 1)
+    out = repo_research.propose(cfg, 'source.py', 1, 'matching code defect hypothesis', 9)
+    assert out['status'] == 'candidate'
+    assert cfg.path('research_session.json').read_bytes() == before
