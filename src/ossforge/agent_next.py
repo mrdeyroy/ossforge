@@ -69,7 +69,7 @@ def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default
         if completed:
             try:
                 prep = preparation._load(cfg)
-                preserved = preparation.task(cfg) if prep else None
+                preserved = preparation.task(cfg, refresh_policy=False) if prep else None
             except (ValueError, OSError, evidence.StaleEvidence, identity.IdentityError) as exc:
                 return result('inspect_local', reason=str(exc), warning='preserve local preparation before continuing')
             return result('contribution_submitted', stop_session=True,
@@ -130,7 +130,7 @@ def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default
     try:
         prep = preparation._load(cfg)
         if prep:
-            checkpoint = preparation.task(cfg)
+            checkpoint = preparation.task(cfg, refresh_policy=False)
             if scope == 'research' and prep['status'] == 'awaiting_owner_review' and cfg.repo_first:
                 preserved_preparation = {'id': prep['id'], 'repo': prep['repo'],
                     'status': prep['status'], 'publication_hold': True,

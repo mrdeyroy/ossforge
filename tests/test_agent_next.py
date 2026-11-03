@@ -157,7 +157,7 @@ def test_explicit_research_scope_preserves_preparation(tmp_path, monkeypatch, te
     status = 'awaiting_owner_review' if terminal else 'local_investigation'
     prep = {'id': 'local-preparation:org/one', 'repo': 'org/one', 'status': status}
     monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: dict(prep))
-    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: dict(prep))
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a, **kw: dict(prep))
     monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': {'status': 'investigating'}})
     monkeypatch.setattr(agent_next.repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
     normal = agent_next.next_step(cfg, queue, 'cfg')
@@ -176,7 +176,7 @@ def test_explicit_research_scope_preserves_preparation(tmp_path, monkeypatch, te
 def test_explicit_research_scope_cannot_hide_bad_preparation(tmp_path, monkeypatch):
     cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
     monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: {'status': 'awaiting_owner_review'})
-    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: (_ for _ in ()).throw(ValueError('stale receipt')))
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a, **kw: (_ for _ in ()).throw(ValueError('stale receipt')))
     assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg', 'research')['status'] == 'inspect_local'
 
 
@@ -197,7 +197,7 @@ def test_research_scope_does_not_renew_expired_session(tmp_path, monkeypatch):
     cfg = Config(state_dir=str(tmp_path / 'state'), kill_file=str(tmp_path / 'STOP'), repo_first=True)
     prep = {'id': 'local-preparation:org/one', 'repo': 'org/one', 'status': 'awaiting_owner_review'}
     monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: prep)
-    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: prep)
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a, **kw: prep)
     monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': None})
     monkeypatch.setattr(agent_next.research_session, 'status', lambda *a: {'status': 'search_budget_exhausted'})
     out = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg', 'research')
@@ -211,7 +211,7 @@ def test_scoped_multistep_continuation_keeps_preserved_hold(tmp_path, monkeypatc
     queue = Queue(cfg.path('queue.json'))
     prep = {'id': 'local-preparation:org/one', 'repo': 'org/one', 'status': 'awaiting_owner_review'}
     monkeypatch.setattr(agent_next.preparation, '_load', lambda *a: prep)
-    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a: prep)
+    monkeypatch.setattr(agent_next.preparation, 'task', lambda *a, **kw: prep)
     monkeypatch.setattr(agent_next.repo_research, 'load', lambda *a: {'lead': {'status': 'investigating'}})
     monkeypatch.setattr(agent_next.repo_research, 'checkpoint', lambda *a: {'status': 'repo_investigation'})
     scope = 'research'

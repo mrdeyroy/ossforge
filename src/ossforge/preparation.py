@@ -63,7 +63,7 @@ def _save(cfg, record):
     path = cfg.path('local_preparation.json')
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix('.tmp')
-    record = {k: v for k, v in record.items() if k not in {'result_schema', 'next', 'warning'}}
+    record = {k: v for k, v in record.items() if k not in {'result_schema', 'next', 'warning', 'policy_freshness', 'policy_warning'}}
     tmp.write_text(json.dumps(record, indent=2))
     tmp.replace(path)
 
@@ -99,15 +99,18 @@ def begin(cfg, lead, review):
     return task(cfg)
 
 
-def task(cfg):
+def task(cfg, *, refresh_policy=True):
     record = _load(cfg)
     if not record:
         return {'status': 'no_local_preparation'}
     from . import policy_review, identity
     identity.require(identity.check_upstream(record['clone'], record['repo']))
-    if not policy_review.preparation_review(cfg, record['repo'], policy_review.snapshot(
-            record['repo'], extra_paths=record['policy_review'].get('extra_paths', []))):
+    snapshot = (policy_review.snapshot(record['repo'], extra_paths=record['policy_review'].get('extra_paths', []))
+                if refresh_policy else record['policy'])
+    if not policy_review.preparation_review(cfg, record['repo'], snapshot):
         raise ValueError('local preparation policy changed or scope unresolved; preserve work')
+    record = {**record, 'policy_freshness': 'checked_current' if refresh_policy else 'saved_unvalidated',
+              'policy_warning': 'Saved policy context is not current clearance; preparation actions recheck live sources.'}
     import json
     marker = marker_path(Path(record['clone']))
     if not marker.exists():
