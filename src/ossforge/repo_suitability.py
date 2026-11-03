@@ -12,7 +12,10 @@ MANIFESTS = {'pyproject.toml', 'setup.py', 'setup.cfg', 'Cargo.toml', 'go.mod',
              'package.json', 'CMakeLists.txt', 'Makefile', 'pom.xml', 'build.gradle'}
 SOURCE_DIRS = {'src', 'lib', 'pkg', 'cmd', 'include', 'source'}
 TESTS = {'tests', 'test', 'tox.ini', 'noxfile.py', 'pytest.ini'}
-COLLECTION = re.compile(r'\b(?:curated|awesome|list of|collection of|free (?:programming )?books|learning resources|project.based learning|system design primer)\b', re.I)
+COLLECTION = re.compile(
+    r"(?:\b(?:curated (?:list|collection)|(?:extensive )?list of (?:free |freely available )?(?:public apis|programming tutorials|(?:programming )?books|(?:learning )?resources))\b"
+    r"|^#{1,2}\s+(?:\[)?(?:awesome python|(?:the )?system design primer|project based learning)\b)", re.I | re.M)
+
 
 
 def assess(repo: str, revision: str, policy: dict) -> dict:
