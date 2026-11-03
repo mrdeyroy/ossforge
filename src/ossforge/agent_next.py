@@ -10,7 +10,7 @@ import math
 import time
 from pathlib import Path
 
-from . import qualification, driver, evidence, submit
+from . import repo_research, qualification, driver, evidence, submit
 from .config import Config
 from .queue import Queue
 
@@ -63,7 +63,7 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
     if remaining > 0:
         return result("wait_for_cooldown", retry_after_seconds=math.ceil(remaining),
                       retry_at_epoch=until, reason="recorded GitHub cooldown; do not search or change accounts to bypass it")
-    pending = [i for i in queue.by_status("found") if i.kind == "issue" and i.source_issue and not i.clone]
+    pending = [i for i in queue.by_status("found") if i.source_issue and not i.clone]
     if pending:
         return result("recover_issue_handoff",
                       pending=[{"id": i.id, "repo": i.repo, "source_issue": i.source_issue} for i in pending],
@@ -86,14 +86,19 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
         lead = sorted(reviews, key=lambda r: (r["repo"], r["number"]))[0]
         return result("review_needed", lead=lead,
                       review_argv=prefix + ["review-qualification", lead["repo"], str(lead["number"])],
-                      next_argv=prefix + ["loop", "--once", "--prepare-only"],
+                      next_argv=prefix + (["research-repo"] if cfg.repo_first else ["loop", "--once", "--prepare-only"]),
                       warning="Saved references are not current truth or proof of a fix. Refresh and inspect implementation, policy and discussion. No automatic approval/coding/publication; independent discovery may continue. Use review-qualification --defer REASON to pause this review.")
     held = queue.by_status("held")
     if held:
         return result("held_work", reason="unresolved held work is excluded from coding selection, not rejected or verified",
                       held=[{"id": i.id, "repo": i.repo, "reason": i.hold_reason} for i in held],
-                      next_argv=prefix + ["loop", "--once", "--prepare-only"],
+                      next_argv=prefix + (["research-repo"] if cfg.repo_first else ["loop", "--once", "--prepare-only"]),
                       warning="independent discovery may continue; unhold only after its prerequisite is resolved")
+    if cfg.repo_first:
+        try:
+            return repo_research.checkpoint(cfg, prefix)
+        except repo_research.Invalid as exc:
+            return result("inspect_local", reason=str(exc), warning="preserve repository research state; do not reset it")
     completed = [i for i in queue.items.values() if i.submitted.get("pr_url") or i.submitted.get("pr")]
     return result("no_work", reason="no locally actionable candidate; not proof that no opportunity exists",
                   completed=[{"id": i.id, "saved_pr": i.submitted.get("pr_url") or i.submitted.get("pr")} for i in completed],
