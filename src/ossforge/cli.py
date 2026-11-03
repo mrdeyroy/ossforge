@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
                     result = (repo_research.defer(cfg, a.defer) if a.defer else
                               repo_research.begin(cfg) if a.begin else
                               repo_research.refresh(cfg) if a.refresh else repo_research.prepare(cfg))
-        except (repo_research.Invalid, dedupe.Incomplete, gh.GhError, safety.Blocked) as exc:
+        except (repo_research.Invalid, dedupe.Incomplete, gh.ReadBudgetExceeded, gh.GhError, safety.Blocked) as exc:
             print(f"REFUSED: {exc}", file=sys.stderr)
             return 1
         emit(result)

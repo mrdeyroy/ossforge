@@ -156,3 +156,39 @@ def test_checkpoint_compacts_policy_text_without_discarding_saved_source(monkeyp
     result = repo_research.checkpoint(cfg, ['ossforge'])
     assert 'text' not in result['lead']['policy']['docs'][0]
     assert repo_research.load(cfg)['lead']['policy']['docs'][0]['text'] == 'full source text'
+
+
+def test_held_and_qualification_are_visible_without_blocking_independent_research(tmp_path, monkeypatch):
+    from ossforge.queue import Item
+    cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'), repo_first=True)
+    q = Queue(cfg.path('queue.json'))
+    q.add(Item('held', 'org/held', 'a.py', 1, 'bug', 'held work', status='held', hold_reason='permission missing'))
+    step = agent_next.next_step(cfg, q, 'cfg')
+    assert step['status'] == 'held_work'
+    assert step['next_argv'][-1] == 'research-repo'
+    # An explicit independent research command remains reachable, not an
+    # automatic unhold or a review dismissal.
+    setup_sources(monkeypatch)
+    assert repo_research.prepare(cfg)['status'] == 'repo_review_needed'
+    assert agent_next.next_step(cfg, q, 'cfg')['status'] == 'held_work'
+    q.items.clear()
+    monkeypatch.setattr(agent_next.qualification, 'pending', lambda *a: [{'repo': 'org/review', 'number': 42}])
+    step = agent_next.next_step(cfg, q, 'cfg')
+    assert step['status'] == 'review_needed'
+    assert step['review_argv'][-2:] == ['org/review', '42']
+    assert step['next_argv'][-1] == 'research-repo'
+
+
+def test_deferral_scope_and_exhaustion_do_not_reselect_rejections(tmp_path, monkeypatch):
+    setup_sources(monkeypatch)
+    cfg = Config(state_dir=str(tmp_path), kill_file=str(tmp_path/'STOP'), repo_first=True)
+    repo_research.prepare(cfg)
+    repo_research.defer(cfg, 'no supported native reproduction')
+    repo_research.prepare(cfg)
+    repo_research.defer(cfg, 'contribution prerequisite unresolved')
+    assert repo_research.prepare(cfg)['status'] == 'repo_pool_exhausted'
+    assert repo_research.prepare(cfg)['status'] == 'repo_pool_exhausted'
+    assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')['status'] == 'repo_pool_exhausted'
+    assert len(repo_research.load(cfg)['deferred']) == 2
+    cfg.min_stars += 1  # deliberate selection-scope change permits reassessment
+    assert repo_research.prepare(cfg)['repo'] == 'org/one'

@@ -7,6 +7,7 @@ The IDE owns semantic diagnosis. Health and merge samples are not permission.
 from __future__ import annotations
 
 import json
+import hashlib
 import fcntl
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -67,6 +68,11 @@ def _save(cfg: Config, data: dict) -> None:
     tmp.replace(path)
 
 
+def _selection_scope(cfg: Config) -> str:
+    return hashlib.sha256(json.dumps({'languages': cfg.languages, 'min_stars': cfg.min_stars,
+        'min_repo_score': cfg.min_repo_score, 'preferred_repos': cfg.preferred_repos}, sort_keys=True).encode()).hexdigest()
+
+
 def prepare(cfg: Config) -> dict:
     """One bounded repository selection and source collection, no issue query."""
     safety.kill_switch(cfg)
@@ -79,7 +85,17 @@ def prepare(cfg: Config) -> dict:
         pool = discovery.discover_broad_repos(cfg, cfg.languages[0], data['cursor'] // 5)
         if not pool:
             raise Invalid('repository pool unavailable; cursor unchanged, not proof of no work')
-        repo = pool[data['cursor'] % len(pool)]
+        scope = _selection_scope(cfg)
+        rejected = {d['repo'].lower() for d in data.get('deferred', [])
+                    if d.get('scope', scope) == scope}
+        ordered = pool[data['cursor'] % len(pool):] + pool[:data['cursor'] % len(pool)]
+        repo = next((r for r in ordered if r.lower() not in rejected), None)
+        if repo is None:
+            data['exhausted'] = {'status': 'repo_pool_exhausted', 'scope': scope, 'pool': pool,
+                                 'reason': 'all repositories in this bounded pool were deferred; inspect recorded reasons or explicitly choose another selection scope'}
+            _save(cfg, data)
+            return data['exhausted']
+        data.pop('exhausted', None)
         # Persist identity before potentially slow evidence collection. A partial
         # read is a recoverable research lead, never a completed suitability pass.
         lead = {'repo': repo, 'status': 'collecting', 'pool': pool,
@@ -141,7 +157,8 @@ def defer(cfg: Config, reason: str) -> dict:
         raise Invalid('no selected repository to defer')
     history = data.setdefault('deferred', [])
     history.append({'repo': data['lead']['repo'], 'reason': reason,
-                    'revision': data['lead'].get('revision')})
+                    'revision': data['lead'].get('revision'), 'scope': _selection_scope(cfg),
+                    'freshness': 'until explicit selection-scope change; not a permanent claim about upstream'})
     data.update(cursor=data['cursor'] + 1, lead=None)
     _save(cfg, data)
     return {'status': 'deferred', 'reason': reason, 'cursor': data['cursor']}
@@ -158,18 +175,27 @@ def begin(cfg: Config) -> dict:
     why = policy_review.check(cfg, lead['repo'], lead['policy'])
     if why:
         raise Invalid(why)
-    route = policy_review.publication_route(cfg, lead['repo'])
+    try:
+        route = policy_review.publication_route(cfg, lead['repo'])
+    except ValueError as exc:
+        raise Invalid(str(exc)) from exc
     if route not in {'issue_pr', 'pr_only'}:
         raise Invalid('contribution discussion/permission prerequisite unresolved; no coding investigation')
     history = safety.Audit(cfg.path('audit.jsonl')).read()
     blocked = safety.repo_allowed(cfg, lead['repo'], safety.effective_history(history))
     if blocked:
         raise Invalid(blocked)
-    clone = hunt.clone(cfg, lead['repo'])
+    try:
+        clone = hunt.clone(cfg, lead['repo'])
+    except (RuntimeError, OSError) as exc:
+        raise Invalid(f'checkout unavailable; preserve it and inspect: {exc}') from exc
     tip = submit._run(['git', 'rev-parse', 'HEAD'], str(clone))
     if tip != lead['revision']:
         raise Invalid('checkout differs from current selected revision; preserve it and inspect, never reset')
-    snapshot = evidence.capture(clone, tip, [])
+    try:
+        snapshot = evidence.capture(clone, tip, [])
+    except evidence.StaleEvidence as exc:
+        raise Invalid(f'checkout changed; preserve it and inspect: {exc}') from exc
     data = load(cfg)
     # Deterministic local hints come first. They save broad source reads, but
     # empty output is not proof that the repo has no defects. No AI is invoked.
@@ -205,7 +231,10 @@ def propose(cfg: Config, path: str, line: int, detail: str) -> dict:
         raise Invalid('candidate path must be a real file inside the selected checkout')
     if line > len(file.read_text(errors='replace').splitlines()):
         raise Invalid('candidate line is outside the selected file')
-    current = evidence.capture(root, lead['base'], [])
+    try:
+        current = evidence.capture(root, lead['base'], [])
+    except evidence.StaleEvidence as exc:
+        raise Invalid(f'investigation checkout changed; preserve it and inspect: {exc}') from exc
     if any(current[k] != lead['checkout'][k] for k in ('tree', 'branch', 'base')):
         raise Invalid('investigation checkout changed; preserve it and refresh before proposing')
     why = policy_review.check(cfg, lead['repo'])
@@ -239,6 +268,8 @@ def propose(cfg: Config, path: str, line: int, detail: str) -> dict:
 
 def checkpoint(cfg: Config, prefix: list[str]) -> dict:
     data = load(cfg)
+    if not data['lead'] and data.get('exhausted', {}).get('scope') == _selection_scope(cfg):
+        return {'schema': 1, 'local_only': True, **data['exhausted']}
     if data['lead']:
         # Checkpoint is routing context, not a repeated dump of all documents.
         lead = dict(data['lead'])

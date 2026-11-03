@@ -400,3 +400,16 @@ checks cannot settle the question, plus the fix and necessary prose. Ossforge su
 steps and evidence checks without requiring a second model subscription. This
 stage connects repository selection to a public semantic-investigation/proposal
 path; it is not proof that a fresh IDE has completed a useful contribution.
+
+Repository deferrals are durable for the recorded selection scope (language,
+star/health thresholds and preferred repositories). They are not assertions that
+upstream can never change. Selection does not wrap back to a deferred repository
+in the same scope; an exhausted bounded pool returns `repo_pool_exhausted`.
+Inspect the saved reasons before deliberately changing the selection scope for
+reassessment. There is no automatic rejection expiry that silently repeats work.
+
+Existing pending issue handoffs, incomplete issue-search journals, qualification
+reviews and held work remain visible before new repo-first research. Held work
+and qualification review checkpoints offer an explicit independent
+`research-repo` command, so an unresolved hold does not require unholding it to
+search elsewhere. This does not mark old work complete or overwrite its records.
