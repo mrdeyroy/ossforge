@@ -73,6 +73,9 @@ def scan_text(text: str, source: str | None = None) -> PolicyResult:
         restriction = re.search(r"\b(?:forbid\w*|prohibit\w*|ban(?:ned|s)?|not accept\w*|not allowed|no ai|no llm)\b", block)
         if not (ai and restriction):
             continue
+        if (re.search(r"\b(?:not prohibited|not forbidden|do not prohibit|do not forbid|does not forbid)\b", block)
+                and not re.search(r"\b(?:but|however|except)\b|[;]", block)):
+            continue
         uncertain = bool(re.search(r"[\"'>]|\b(?:if|would|could|might|hypothetical|example|quoted|other projects?|license|attestation|not forbid|not prohibit|do not forbid|does not forbid)\b", block))
         decisive = re.fullmatch(
             r"(?:this (?:project|repository|repo) )?(?:strictly )?forbids the (?:usage|use) of "
