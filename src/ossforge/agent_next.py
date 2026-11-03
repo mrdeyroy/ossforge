@@ -120,6 +120,19 @@ def next_step(cfg: Config, queue: Queue, config_path: str, scope: str = 'default
     if cfg.repo_first:
         try:
             lead = repo_research.load(cfg)['lead']
+            completed = [i for i in queue.items.values()
+                         if lead and i.repo == lead.get('repo') and i.clone == lead.get('clone')
+                         and (i.submitted.get('pr_url') or i.submitted.get('pr'))]
+            if completed:
+                return result('contribution_submitted', stop_session=True,
+                              completed=[{'id': i.id, 'repo': i.repo,
+                                          'saved_issue': i.submitted.get('issue_url') or i.submitted.get('issue'),
+                                          'saved_pr': i.submitted.get('pr_url') or i.submitted.get('pr')}
+                                         for i in completed],
+                              preserved_preparation=preserved_preparation,
+                              warning='Saved submission progress, not live remote state or maintainer acceptance. '
+                                      'Stop this contribution session; do not propose the same work or publish again. '
+                                      'Check live remote outcomes only when requested or relevant feedback arrives.')
             if not lead or lead['status'] != 'investigating':
                 session = research_session.status(cfg)
                 if session['status'] != 'search_session_active':

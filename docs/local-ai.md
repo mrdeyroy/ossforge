@@ -53,6 +53,10 @@ Do not start a nested model process just because you are already an AI assistant
 >   then return to agent-next and the normal native-check route.
 >   Do not edit state files or treat an issue's age as permission.
 > Follow its structured checkpoint:
+> - contribution_submitted: stop this contribution session. Report the saved
+>   issue/PR links as submission progress, not live status or acceptance. Do not
+>   propose or publish the same work again; reconcile current remote state when
+>   requested or relevant feedback arrives. This does not start PR polling.
 > - stopped: preserve state and wait for the owner, never clear STOP yourself.
 > - reconcile_remote: inspect current issue, owner fork branch and exact-head PR
 >   state before retrying. A saved URL is not current remote truth. If a prior
