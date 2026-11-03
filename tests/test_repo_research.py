@@ -11,6 +11,7 @@ def prepare(cfg):
 
 
 def setup_sources(monkeypatch):
+    monkeypatch.setattr(repo_research, '_source_snapshot', lambda repo, number: {'number': number, 'updated_at': 'one'})
     monkeypatch.setattr(duplicate_reviews, 'snapshot', lambda repo, number: {'number': number, 'updated_at': 'one'})
     monkeypatch.setattr(repo_research.repo_suitability, 'assess', lambda *a: {'status': 'native_candidate'})
     monkeypatch.setattr(repo_research.discovery, 'discover_broad_repos', lambda *a: ['org/one', 'org/two'])
@@ -463,3 +464,52 @@ def test_research_review_cli_requires_source_and_reason():
     from ossforge.cli import build_parser
     args = build_parser().parse_args(['research-review', 'a' * 40, '--reason', 'inspected diff'])
     assert args.source == 'a' * 40 and args.reason == 'inspected diff'
+
+
+@pytest.mark.parametrize('change', ['body', 'user', 'updated_at'])
+def test_research_discussion_edit_changes_snapshot(monkeypatch, change):
+    comment = {'id': 1, 'html_url': 'https://github.com/org/one/issues/10#issuecomment-1',
+               'body': 'Unclaimed', 'created_at': 'created', 'updated_at': 'first',
+               'user': {'id': 2, 'login': 'someone'}}
+    monkeypatch.setattr(duplicate_reviews, 'snapshot', lambda *a: {'comments': 1, 'updated_at': 'unchanged'})
+    monkeypatch.setattr(repo_research.gh, 'api', lambda *a, **kw: [dict(comment)])
+    first = repo_research._source_snapshot('org/one', 10)
+    comment[change] = {'id': 3, 'login': 'other'} if change == 'user' else 'claimed edit'
+    second = repo_research._source_snapshot('org/one', 10)
+    assert first != second
+
+
+@pytest.mark.parametrize('comments,count', [([], 1), ([{}], 1), ([], None), ([{}] * 100, 100)])
+def test_research_incomplete_discussion_holds(monkeypatch, comments, count):
+    monkeypatch.setattr(duplicate_reviews, 'snapshot', lambda *a: {'comments': count})
+    monkeypatch.setattr(repo_research.gh, 'api', lambda *a, **kw: comments)
+    with pytest.raises(repo_research.Invalid, match='incomplete'):
+        repo_research._source_snapshot('org/one', 10)
+
+
+def test_research_snapshot_is_inside_original_read_budget(source_review, monkeypatch):
+    cfg, sha, snapshots = source_review
+    def snapshot(*a):
+        assert repo_research.gh._READ_DEADLINE is not None
+        return dict(snapshots['value'])
+    monkeypatch.setattr(duplicate_reviews, 'commit_snapshot', snapshot)
+    with pytest.raises(repo_research.Invalid, match=sha):
+        repo_research.propose(cfg, 'source.py', 1, 'optional README 404 hypothesis')
+
+
+def test_research_checkpoint_marks_stale_context(source_review):
+    cfg, _, _ = source_review
+    from ossforge import issue_reviews
+    path = cfg.path('research_source_review.json')
+    saved = issue_reviews.load(path)
+    saved['context']['detail'] = 'changed without matching fingerprint'
+    issue_reviews._save(path, saved)
+    result = repo_research.checkpoint(cfg, ['ossforge'])
+    assert result['lead']['source_review']['status'] == 'stale'
+    assert 'hits' not in result['lead']['source_review']
+
+
+def test_research_checkpoint_labels_valid_saved_review_unvalidated(source_review):
+    cfg, _, _ = source_review
+    result = repo_research.checkpoint(cfg, ['ossforge'])
+    assert result['lead']['source_review']['status'] == 'saved_unvalidated'
