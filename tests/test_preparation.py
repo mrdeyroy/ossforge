@@ -89,6 +89,12 @@ def test_native_verification_stays_outside_public_queue(prepared, monkeypatch):
     assert selected['status'] == 'repo_investigation'
     assert selected['preserved_preparation']['publication_hold']
     assert cfg.path('local_preparation.json').read_bytes() == before
+    with monkeypatch.context() as local:
+        local.setattr(policy_review, 'snapshot', lambda *a, **kw: pytest.fail('no remote policy read in terminal checkpoint'))
+        terminal = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg.yml')
+        assert terminal['preparation']['policy_freshness'] == 'saved_unvalidated'
+        assert terminal['status'] == 'awaiting_owner_review'
+        assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg.yml', 'research')['status'] == 'repo_investigation'
     assert 'STOP' in preparation.task(cfg)['next']
     assert 'result_schema' not in preparation.task(cfg)
 
@@ -256,3 +262,26 @@ def test_distinct_preparation_does_not_overwrite_preserved_journal(prepared):
     with pytest.raises(ValueError, match='never overwrite'):
         preparation.begin(cfg, {'repo': 'other/repo', 'revision': base}, {})
     assert cfg.path('local_preparation.json').read_bytes() == before
+
+
+def test_local_checkpoint_never_fetches_policy_but_action_does(prepared, monkeypatch):
+    cfg, root, base, snap = prepared
+    from ossforge import agent_next
+    before = cfg.path('local_preparation.json').read_bytes()
+    def offline(*a, **kw):
+        raise RuntimeError('controlled remote policy outage')
+    monkeypatch.setattr(policy_review, 'snapshot', offline)
+    out = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')
+    assert out['status'] == 'local_preparation'
+    assert out['preparation']['policy_freshness'] == 'saved_unvalidated'
+    assert out['preparation']['publication_hold']
+    assert cfg.path('local_preparation.json').read_bytes() == before
+    with pytest.raises(RuntimeError, match='remote policy outage'):
+        preparation.task(cfg)
+
+
+def test_local_checkpoint_preserves_invalid_saved_scope_hold(prepared):
+    cfg, root, base, snap = prepared
+    from ossforge import agent_next
+    policy_review.record(cfg, 'org/repo', snap, 'local scope no longer approved', local_preparation='forbidden')
+    assert agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg')['status'] == 'inspect_local'

@@ -585,3 +585,11 @@ source-review reads or candidate creation. Resolve its real prerequisite and
 reread current rules; a saved investigation is not permission to bypass it.
 Ordinary `issue_pr` and `pr_only` routes retain their existing behavior, and
 publication still performs its own fresh checks.
+
+
+Preparation context inside `agent-next` is a local view. It validates the saved
+scope record, origin marker, pinned base and current local receipt without
+fetching GitHub policy documents. It labels that policy `saved_unvalidated`,
+never current clearance. Explicit `preparation-task`, commit and verification
+still recheck live policy. An outage cannot silently clear a publication hold;
+changed or invalid local receipts still stop the checkpoint for inspection.
