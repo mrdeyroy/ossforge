@@ -36,6 +36,11 @@ Do not start a nested model process just because you are already an AI assistant
 >   source-backed review, then use the supplied --begin command only when the
 >   rules allow this work. Otherwise defer with a specific reason and continue
 >   to another selected repo within the session's approved search budget.
+> - search_session_needed: ask the owner for the session search allowance if it
+>   was not supplied, then run research-session --seconds SECONDS.
+> - search_budget_exhausted: stop new repository search. Summarize what was
+>   checked; do not extend or restart the budget silently. Existing source
+>   investigation/native verification can continue without new repository search.
 > - repo_investigation: inspect the clean selected source semantically. The IDE
 >   AI diagnoses bugs, chooses fixes and writes issue/PR explanations. Static
 >   hunt hints are optional. Use research-propose for a source-reviewed new
@@ -358,6 +363,17 @@ contribution success.
 Set `repo_first: true` in the chosen config to use repository research when there
 is no existing actionable queue item. This does not change identity or authority.
 The issue-only compatibility route remains available with `repo_first: false`.
+
+Start the session explicitly: `research-session --seconds 3600` is a one-hour
+example, not a mandatory timeout. Elapsed wall time includes interruptions.
+`research-session` reads status and does not reset its deadline. Config changes
+that affect selection or identity stop resume for inspection. An expired session
+needs `research-session --new --seconds SECONDS` to start another, preserving the
+previous record in history. The IDE must not silently renew a user's allowance.
+Local source investigation and native verification are separate from repository
+search; an expired budget does not discard a checkout, queue or saved issue batch.
+No schedule, daemon or model call is started. Per-command read pacing/cooldowns
+still apply inside the remaining session budget.
 Saved issue batches and issue cursors are not modified by repository research.
 
 Follow `agent-next` as usual:

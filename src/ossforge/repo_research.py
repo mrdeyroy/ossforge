@@ -17,6 +17,7 @@ from pathlib import Path
 from . import acceptance, audit, dedupe, discovery, evidence, gh, hunt, policy_review, radar, repo_access, safety, submit
 from .queue import Item, Queue, item_id
 from .config import Config
+from . import research_session
 
 
 class Invalid(ValueError):
@@ -81,7 +82,7 @@ def prepare(cfg: Config) -> dict:
         return data['lead']  # explicit refresh/defer, never silently replace a lead
     if len(cfg.languages) != 1:
         raise Invalid('repo-first research requires exactly one configured language')
-    with gh.read_budget(cfg.discovery_read_budget_seconds):
+    with gh.read_budget(research_session.allowance(cfg) if cfg.repo_first else cfg.discovery_read_budget_seconds):
         pool = discovery.discover_broad_repos(cfg, cfg.languages[0], data['cursor'] // 5)
         if not pool:
             raise Invalid('repository pool unavailable; cursor unchanged, not proof of no work')
@@ -112,7 +113,7 @@ def refresh(cfg: Config) -> dict:
     if not lead:
         raise Invalid('no selected repository; run research-repo first')
     repo = lead['repo']
-    with gh.read_budget(cfg.discovery_read_budget_seconds):
+    with gh.read_budget(research_session.allowance(cfg) if cfg.repo_first else cfg.discovery_read_budget_seconds):
         restriction = repo_access.pr_restriction(repo)
         health = radar.analyze(repo)
         outside = acceptance.evidence(repo)
