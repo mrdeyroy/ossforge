@@ -23,10 +23,12 @@ def prepared(tmp_path, monkeypatch):
     git(root, 'add', '.')
     git(root, 'commit', '-m', 'base')
     base = git(root, 'rev-parse', 'HEAD')
-    cfg = Config(state_dir=str(tmp_path / 'state'), work_dir=str(tmp_path / 'work'), kill_file=str(tmp_path / 'STOP'))
+    cfg = Config(state_dir=str(tmp_path / 'state'), work_dir=str(tmp_path / 'work'), kill_file=str(tmp_path / 'STOP'), github_user='test', git_name='Test', git_email='test@example.invalid')
     snap = {'repo': 'org/repo', 'docs': [{'path': 'LICENSE', 'sha': 'pinned', 'url': 'https://example.test/LICENSE', 'text': 'modification allowed'}], 'scanned_locations': ['LICENSE'], 'anti_ai': True, 'agent_review': []}
     rec = policy_review.record(cfg, 'org/repo', snap, 'Independent local modification licensed; no upstream contribution.', prohibited=True, local_preparation='allowed')
     monkeypatch.setattr(policy_review, 'snapshot', lambda *a, **kw: snap)
+    from ossforge import identity
+    monkeypatch.setattr(identity, 'check_login', lambda *a: [])
     monkeypatch.setattr(preparation, 'marker_path', preparation.marker_path)
     monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: root)
     lead = {'repo': 'org/repo', 'revision': base, 'policy': snap}
@@ -75,6 +77,11 @@ def test_native_verification_stays_outside_public_queue(prepared, monkeypatch):
     assert out['verification']['failed_without_fix'] and out['verification']['passed_with_fix']
     assert Path(out['artifacts'], 'change.patch').read_text().startswith('diff --git')
     assert not Queue(cfg.path('queue.json')).items
+    from ossforge import agent_next
+    checkpoint = agent_next.next_step(cfg, Queue(cfg.path('queue.json')), 'cfg.yml')
+    assert checkpoint['status'] == 'awaiting_owner_review'
+    assert 'STOP' in preparation.task(cfg)['next']
+    assert 'result_schema' not in preparation.task(cfg)
 
 
 def test_missing_or_stale_scope_not_permission(tmp_path):
@@ -134,3 +141,88 @@ def test_bad_journal_and_missing_marker_preserve_work(prepared):
     cfg.path('local_preparation.json').write_text('{invalid')
     with pytest.raises(ValueError, match='journal unreadable'):
         preparation._load(cfg)
+
+
+def test_orphan_history_not_an_actionable_task(prepared):
+    cfg, root, base, snap = prepared
+    git(root, 'checkout', '--orphan', 'unrelated')
+    git(root, 'rm', '-rf', '.')
+    (root / 'unrelated.py').write_text('x = 1\n')
+    git(root, 'add', '.')
+    git(root, 'commit', '-m', 'unrelated history')
+    with pytest.raises(ValueError, match='pinned base'):
+        preparation.task(cfg)
+
+
+def test_wrong_commit_identity_cannot_export(prepared):
+    from ossforge import identity
+    cfg, root, base, snap = prepared
+    git(root, 'checkout', '-b', 'fix')
+    (root / 'a.py').write_text('def value(): return 1\n')
+    (root / 'test_value.py').write_text('from a import value\nassert value() == 1\n')
+    git(root, 'add', '.')
+    git(root, '-c', 'user.name=Someone Else', '-c', 'user.email=else@example.invalid', 'commit', '-m', 'wrong identity')
+    result = preparation.task(cfg)['result_schema']
+    result.update(branch='fix', test_command=['python', 'test_value.py'])
+    with pytest.raises(identity.IdentityError, match='identity check failed'):
+        preparation.complete(cfg, result)
+    assert not cfg.path('local-preparation-artifacts').exists()
+
+
+def test_linked_review_sources_are_used_on_refresh(prepared, monkeypatch):
+    from ossforge import radar, acceptance
+    cfg, root, base, snap = prepared
+    rec = policy_review._load(cfg)['org/repo']
+    rec['extra_paths'] = ['docs/local-scope.md']
+    allr = {'org/repo': rec}
+    import json
+    cfg.path('policy_reviews.json').write_text(json.dumps(allr))
+    repo_research._save(cfg, {'schema': 1, 'cursor': 0, 'lead': {'repo': 'org/repo', 'status': 'repo_review_needed'}})
+    monkeypatch.setattr(repo_research.repo_access, 'pr_restriction', lambda *a: '')
+    monkeypatch.setattr(repo_research.radar, 'analyze', lambda r: radar.RepoScore(r, 80, 'Go'))
+    monkeypatch.setattr(repo_research.acceptance, 'evidence', lambda r: acceptance.Acceptance(r, 'unknown'))
+    monkeypatch.setattr(repo_research.repo_suitability, 'assess', lambda *a: {'status': 'native_candidate'})
+    monkeypatch.setattr(repo_research.gh, 'api', lambda path, **kw: {'sha': base, 'html_url': 'https://example.test/commit'} if '/commits/' in path else {'default_branch': 'main', 'html_url': 'https://example.test/repo'})
+    seen = []
+    def snapshot(repo, extra_paths=None):
+        seen.append(extra_paths)
+        return snap
+    monkeypatch.setattr(policy_review, 'snapshot', snapshot)
+    assert repo_research.begin(cfg)['status'] == 'local_investigation'
+    assert seen[0] == ['docs/local-scope.md']
+
+
+def test_effective_identity_and_terminal_branch_change(prepared, monkeypatch):
+    from ossforge import identity
+    cfg, root, base, snap = prepared
+    git(root, 'checkout', '-b', 'fix')
+    (root / 'a.py').write_text('def value(): return 1\n')
+    (root / 'test_value.py').write_text('from a import value\nassert value() == 1\n')
+    git(root, 'add', '.')
+    git(root, 'commit', '-m', 'fix')
+    import sys
+    result = preparation.task(cfg)['result_schema']
+    result.update(branch='fix', test_command=[sys.executable, 'test_value.py'], check_commands=[[sys.executable, '-c', 'pass']])
+    monkeypatch.setenv('GIT_COMMITTER_NAME', 'Wrong')
+    with pytest.raises(identity.IdentityError, match='effective git committer'):
+        preparation.complete(cfg, result)
+    monkeypatch.delenv('GIT_COMMITTER_NAME')
+    preparation.complete(cfg, result)
+    git(root, 'checkout', 'main')
+    with pytest.raises(ValueError):
+        preparation.task(cfg)
+
+
+def test_orphan_completion_refused_before_native_checks(prepared, monkeypatch):
+    cfg, root, base, snap = prepared
+    git(root, 'checkout', '--orphan', 'fix')
+    git(root, 'rm', '-rf', '.')
+    (root / 'a.py').write_text('def value(): return 1\n')
+    (root / 'test_value.py').write_text('from a import value\nassert value() == 1\n')
+    git(root, 'add', '.')
+    git(root, 'commit', '-m', 'unrelated')
+    from ossforge import verify
+    monkeypatch.setattr(verify, 'verify_fix', lambda *a, **kw: pytest.fail('native checks reached'))
+    with pytest.raises(ValueError, match='pinned base'):
+        preparation.complete(cfg, {'id': 'local-preparation:org/repo'})
+    assert not cfg.path('local-preparation-artifacts').exists()

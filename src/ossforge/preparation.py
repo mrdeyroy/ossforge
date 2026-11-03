@@ -63,6 +63,7 @@ def _save(cfg, record):
     path = cfg.path('local_preparation.json')
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix('.tmp')
+    record = {k: v for k, v in record.items() if k not in {'result_schema', 'next', 'warning'}}
     tmp.write_text(json.dumps(record, indent=2))
     tmp.replace(path)
 
@@ -92,7 +93,8 @@ def begin(cfg, lead, review):
     marker = marker_path(root)
     if marker.exists():
         raise ValueError('preparation origin already present without journal; inspect it')
-    marker.write_text(json.dumps({'schema': 1, 'publication_hold': True, 'repo': lead['repo']}))
+    marker.write_text(json.dumps({'schema': 1, 'publication_hold': True, 'repo': lead['repo'],
+                                  'base': tip, 'clone': str(root.resolve())}))
     _save(cfg, record)
     return task(cfg)
 
@@ -105,8 +107,32 @@ def task(cfg):
     if not policy_review.preparation_review(cfg, record['repo'], policy_review.snapshot(
             record['repo'], extra_paths=record['policy_review'].get('extra_paths', []))):
         raise ValueError('local preparation policy changed or scope unresolved; preserve work')
-    if not marker_path(Path(record['clone'])).exists():
+    import json
+    marker = marker_path(Path(record['clone']))
+    if not marker.exists():
         raise ValueError('preparation origin missing; preserve work and inspect')
+    try:
+        origin = json.loads(marker.read_text())
+    except (ValueError, OSError) as exc:
+        raise ValueError('preparation origin unreadable; preserve work') from exc
+    if any(origin.get(k) != record[k] for k in ('repo', 'base', 'clone', 'publication_hold')):
+        raise ValueError('preparation origin differs from journal; preserve work')
+    root = subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=record['clone'], capture_output=True, text=True)
+    if root.returncode or Path(root.stdout.strip()).resolve() != Path(record['clone']).resolve():
+        raise ValueError('preparation checkout root changed; preserve work')
+    base_tree = subprocess.run(['git', 'rev-parse', record['base'] + '^{tree}'], cwd=record['clone'], capture_output=True, text=True)
+    if base_tree.returncode or base_tree.stdout.strip() != record['checkout']['tree']:
+        raise ValueError('preparation pinned receipt changed; preserve work')
+    continuity = subprocess.run(['git', 'merge-base', '--is-ancestor', record['base'], 'HEAD'],
+                                cwd=record['clone'], capture_output=True)
+    if continuity.returncode:
+        raise ValueError('preparation checkout no longer descends from pinned base; preserve work')
+    if record['status'] == 'awaiting_owner_review':
+        from . import evidence
+        receipt = record['verification']['evidence']
+        evidence.check(Path(record['clone']), record['base'], receipt['branch'], receipt)
+        return {**record, 'next': 'STOP: awaiting owner review of local artifacts; no commit, verification or publication action',
+                'warning': 'review is not permission to override source restrictions'}
     return {**record, 'result_schema': {'schema': 1, 'id': record['id'], 'base': record['base'],
             'branch': 'local-fix-branch', 'test_command': ['native-test', 'regression'],
             'check_commands': [['native-check']], 'failure_code': 1, 'consent_issue': 0,
@@ -124,7 +150,7 @@ def commit(cfg, message):
 
 
 def complete(cfg, result):
-    from . import evidence, verify
+    from . import evidence, verify, identity
     import dataclasses
     import json
     record = task(cfg)
@@ -133,6 +159,7 @@ def complete(cfg, result):
     if result.get('outcome') == 'hold' or result['base'] != record['base']:
         raise ValueError('preparation result needs the pinned base and a patch proposal')
     root = Path(record['clone'])
+    identity.require(identity.check_login(cfg) + identity.check_worktree(cfg, str(root), record['base']))
     current = evidence.capture(root, record['base'], [])
     if current['branch'] != result['branch']:
         raise ValueError('result branch differs from preparation checkout')
@@ -142,6 +169,7 @@ def complete(cfg, result):
     if not outcome.ok:
         return {'status': 'local_verification_failed', 'log': outcome.log, 'publication_hold': True}
     evidence.check(root, record['base'], result['branch'], outcome.evidence)
+    identity.require(identity.check_login(cfg) + identity.check_worktree(cfg, str(root), record['base']))
     patch = subprocess.run(['git', 'diff', '--binary', record['base'], 'HEAD'], cwd=root,
                            capture_output=True, check=True).stdout
     artifacts = cfg.path('local-preparation-artifacts')

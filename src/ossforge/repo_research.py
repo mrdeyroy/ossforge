@@ -134,7 +134,9 @@ def refresh(cfg: Config) -> dict:
         restriction = repo_access.pr_restriction(repo)
         health = radar.analyze(repo)
         outside = acceptance.evidence(repo)
-        snapshot = policy_review.snapshot(repo)
+        recorded = policy_review._load(cfg).get(repo.lower(), {})
+        extras = recorded.get('extra_paths', [])
+        snapshot = policy_review.snapshot(repo, extra_paths=extras) if extras else policy_review.snapshot(repo)
         info = gh.api(f'repos/{repo}', fresh=True)
         branch = info.get('default_branch')
         if not branch or not info.get('html_url'):

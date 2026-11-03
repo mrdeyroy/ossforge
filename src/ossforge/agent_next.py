@@ -94,11 +94,15 @@ def next_step(cfg: Config, queue: Queue, config_path: str) -> dict:
                       held=[{"id": i.id, "repo": i.repo, "reason": i.hold_reason} for i in held],
                       next_argv=prefix + (["research-repo"] if cfg.repo_first else ["loop", "--once", "--prepare-only"]),
                       warning="independent discovery may continue; unhold only after its prerequisite is resolved")
-    prep = preparation._load(cfg)
-    if prep and prep['status'] == 'local_investigation':
-        return result('local_preparation', preparation=prep,
-                      next_argv=prefix + ['preparation-task'],
-                      warning='No public queue or submission; source scope still required.')
+    try:
+        prep = preparation._load(cfg)
+        if prep:
+            checkpoint = preparation.task(cfg)
+            return result('local_preparation' if prep['status'] == 'local_investigation' else 'awaiting_owner_review',
+                          preparation=checkpoint, next_argv=prefix + ['preparation-task'],
+                          warning='No public queue or submission; source scope still required.')
+    except (ValueError, OSError, evidence.StaleEvidence) as exc:
+        return result('inspect_local', reason=str(exc), warning='preserve local preparation before continuing')
     if cfg.repo_first:
         try:
             lead = repo_research.load(cfg)['lead']
