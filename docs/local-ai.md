@@ -27,8 +27,8 @@ Do not start a nested model process just because you are already an AI assistant
 > not hold. A rule change requires rereading, not changing the owner's authority.
 >
 > For repository-first code investigation, use `repo_first: true` in the chosen
-> config. This staged route includes a session search-budget controller, but
-> not eligible-existing-issue adoption yet; do not claim the whole workflow is
+> config. This staged route includes a session search-budget controller and
+> freshly vetted existing-issue adoption. Do not claim the whole workflow is
 > proven from repository selection alone.
 > Run `ossforge --config ossforge.yaml agent-next` after startup and each step.
 > - repo_research: follow the repo-first investigation section below. Read the
@@ -47,7 +47,8 @@ Do not start a nested model process just because you are already an AI assistant
 > - repo_investigation: inspect the clean selected source semantically. The IDE
 >   AI diagnoses bugs, chooses fixes and writes issue/PR explanations. Static
 >   hunt hints are optional. Use research-propose for a source-reviewed new
->   hypothesis, then return to agent-next and the normal native-check route.
+>   hypothesis, optionally with --source-issue N for a matching eligible issue,
+>   then return to agent-next and the normal native-check route.
 >   Do not edit state files or treat an issue's age as permission.
 > Follow its structured checkpoint:
 > - stopped: preserve state and wait for the owner, never clear STOP yourself.
@@ -411,9 +412,9 @@ Follow `agent-next` as usual:
   proposal; a missing keyword hit is not complete semantic duplicate clearance.
 - A 2-3-day-old issue with no PR may be worth investigating. It does not grant
   permission, expire a claim or assignment, or prove the bug. Existing issue
-  adoption is still through fresh issue vetting, not `research-propose`; this
-  first stage does not implement closed-reference adjudication or an age-only
-  override. No static result, research record or IDE proposal bypasses native
+  adoption uses `research-propose --source-issue N` with fresh issue vetting
+  and source activity checks as described below. This does not implement
+  closed-reference adjudication or an age-only override. No static result, research record or IDE proposal bypasses native
   fail-before/pass-after verification or current publication gates.
 
 The IDE AI handles semantic diagnosis and brainstorming where deterministic
