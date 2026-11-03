@@ -404,9 +404,11 @@ path; it is not proof that a fresh IDE has completed a useful contribution.
 Repository deferrals are durable for the recorded selection scope (language,
 star/health thresholds and preferred repositories). They are not assertions that
 upstream can never change. Selection does not wrap back to a deferred repository
-in the same scope; an exhausted bounded pool returns `repo_pool_exhausted`.
-Inspect the saved reasons before deliberately changing the selection scope for
-reassessment. There is no automatic rejection expiry that silently repeats work.
+in the same scope; an exhausted current bounded search window returns `repo_pool_exhausted`.
+This is not proof of global exhaustion or that no suitable repository exists.
+Inspect saved reasons before explicitly searching another window; the next
+session-controller stage will expose window advancement. A deliberate selection
+scope change can permit reassessment, but is not needed as proof of exhaustion. There is no automatic rejection expiry that silently repeats work.
 
 Existing pending issue handoffs, incomplete issue-search journals, qualification
 reviews and held work remain visible before new repo-first research. Held work

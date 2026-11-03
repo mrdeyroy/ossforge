@@ -192,3 +192,19 @@ def test_deferral_scope_and_exhaustion_do_not_reselect_rejections(tmp_path, monk
     assert len(repo_research.load(cfg)['deferred']) == 2
     cfg.min_stars += 1  # deliberate selection-scope change permits reassessment
     assert repo_research.prepare(cfg)['repo'] == 'org/one'
+
+
+def test_begin_empty_checkout_returns_actionable_refusal(monkeypatch, tmp_path):
+    setup_sources(monkeypatch)
+    cfg = Config(state_dir=str(tmp_path/'state'), kill_file=str(tmp_path/'STOP'))
+    repo_research.prepare(cfg)
+    monkeypatch.setattr(repo_research.policy_review, 'check', lambda *a: '')
+    monkeypatch.setattr(repo_research.policy_review, 'publication_route', lambda *a: 'issue_pr')
+    root = tmp_path/'empty'
+    root.mkdir()
+    monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: root)
+    monkeypatch.setattr(repo_research.submit, '_run', lambda *a: (_ for _ in ()).throw(repo_research.submit.Refused('no HEAD')))
+    with pytest.raises(repo_research.Invalid, match='no readable HEAD; preserve'):
+        repo_research.begin(cfg)
+    assert root.exists()
+    assert repo_research.load(cfg)['lead']['repo'] == 'org/one'

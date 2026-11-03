@@ -92,7 +92,7 @@ def prepare(cfg: Config) -> dict:
         repo = next((r for r in ordered if r.lower() not in rejected), None)
         if repo is None:
             data['exhausted'] = {'status': 'repo_pool_exhausted', 'scope': scope, 'pool': pool,
-                                 'reason': 'all repositories in this bounded pool were deferred; inspect recorded reasons or explicitly choose another selection scope'}
+                                 'reason': 'all repositories in the current bounded search window were deferred; not global exhaustion. Inspect reasons before explicitly searching another window'}
             _save(cfg, data)
             return data['exhausted']
         data.pop('exhausted', None)
@@ -189,7 +189,10 @@ def begin(cfg: Config) -> dict:
         clone = hunt.clone(cfg, lead['repo'])
     except (RuntimeError, OSError) as exc:
         raise Invalid(f'checkout unavailable; preserve it and inspect: {exc}') from exc
-    tip = submit._run(['git', 'rev-parse', 'HEAD'], str(clone))
+    try:
+        tip = submit._run(['git', 'rev-parse', 'HEAD'], str(clone))
+    except submit.Refused as exc:
+        raise Invalid(f'checkout has no readable HEAD; preserve it and inspect: {exc}') from exc
     if tip != lead['revision']:
         raise Invalid('checkout differs from current selected revision; preserve it and inspect, never reset')
     try:
