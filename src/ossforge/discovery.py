@@ -53,16 +53,21 @@ def discover_broad_repos(cfg: Config, language: str | None = None, cursor: int =
 
 def plan(cfg: Config, stats: Stats, language: str | None, label: str,
          strategy: str, cursor: int, broad_repos: list[str] | None = None) -> Plan:
-    if strategy not in {"rotate", "broad", "history", "preferred"}:
-        raise ValueError("strategy must be rotate, broad, history or preferred")
+    if strategy not in {"rotate", "broad", "history", "preferred", "breadth-first"}:
+        raise ValueError("strategy must be rotate, broad, history, preferred or breadth-first")
     preferred = sorted({r.lower() for r in cfg.preferred_repos if _REPO.fullmatch(r)})
     history = sorted(r.lower() for r in stats.d["repos"] if _REPO.fullmatch(r) and stats.repo_boost(r) > 0)
     pools = {"preferred": preferred, "history": history}
     enabled = ["broad"] + [s for s in ("preferred", "history") if pools[s]]
-    chosen = enabled[cursor % len(enabled)] if strategy == "rotate" else strategy
+    epoch_size = 6 + len(enabled) - 1
+    if strategy == "breadth-first":
+        offset = cursor % epoch_size
+        chosen = "broad" if offset < 6 else enabled[offset - 5]
+    else:
+        chosen = enabled[cursor % len(enabled)] if strategy == "rotate" else strategy
     repos = pools.get(chosen, [])
     # Five repositories bound query length and request cost. Rotating windows eventually cover the list.
-    window = cursor // len(enabled) if strategy == "rotate" else cursor
+    window = cursor // epoch_size if strategy == "breadth-first" else (cursor // len(enabled) if strategy == "rotate" else cursor)
     if chosen == "broad" and broad_repos:
         repos = [broad_repos[(window * 5 + i) % len(broad_repos)] for i in range(min(5, len(broad_repos)))]
     elif repos:
@@ -89,7 +94,8 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
              skip_repos: set[str] | None = None) -> list[scout.Candidate]:
     state_path = cfg.path("discovery.json")
     state = issue_reviews.load(state_path)
-    cursor = state.get("cursor", 0)
+    cursor_key = "breadth_cursor" if strategy == "breadth-first" else "cursor"
+    cursor = state.get(cursor_key, 0)
     cursor = cursor if isinstance(cursor, int) and cursor >= 0 else 0
     selected = plan(cfg, stats, language, label, strategy, cursor)
     recent = state.get("recent", {})
@@ -100,7 +106,12 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
             preferred = any(_REPO.fullmatch(r) for r in cfg.preferred_repos)
             history = any(_REPO.fullmatch(r) and stats.repo_boost(r) > 0 for r in stats.d["repos"])
             stride = 1 + int(preferred) + int(history) if strategy == "rotate" else 1
-            broad_repos = discover_broad_repos(cfg, language, cursor // stride)
+            if strategy == "breadth-first":
+                epoch_size = 6 + int(preferred) + int(history)
+                broad_cursor = (cursor // epoch_size) * 6 + cursor % epoch_size
+            else:
+                broad_cursor = cursor // stride
+            broad_repos = discover_broad_repos(cfg, language, broad_cursor)
             if broad_repos:
                 selected.repos = broad_repos
                 selected.query = scout.build_query(language, label, cfg.min_stars) + " " + " ".join(f"repo:{r}" for r in broad_repos)
@@ -124,7 +135,7 @@ def discover(cfg: Config, stats: Stats, language: str | None = None, label: str 
         for c in result:
             if c.verdict.decision == "approve":
                 recent[f"{c.repo.lower()}#{c.number}"] = {"updated_at": c.updated_at, "seen_at": now}
-        issue_reviews._save(state_path, {"cursor": cursor + 1, "recent": recent})
+        issue_reviews._save(state_path, {**state, cursor_key: cursor + 1, "recent": recent})
     for c in result:
         c.why.append(f"discovery source: {selected.strategy}")
     scout.LAST_FUNNEL.update(strategy=selected.strategy, query=selected.query, repos=selected.repos)

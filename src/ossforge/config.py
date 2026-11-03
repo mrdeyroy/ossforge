@@ -30,7 +30,7 @@ class Config:
     skills: list[str] = field(default_factory=list)  # deterministic ranking hints only
     recent_issue_days: int = 7  # discover hides unchanged surfaced approvals temporarily; scout is unchanged
     discovery_read_budget_seconds: float = 120  # cooperative GitHub-read phase budget, not whole-run timeout
-    discovery_strategy: str = "broad"  # loop: broad preserves original behavior; rotate opts into affinity
+    discovery_strategy: str = "broad"  # broad default; rotate affinity; breadth-first opt-in coverage experiment
     labels: list[str] = field(default_factory=lambda: ["help wanted", "good first issue"])
     max_open_prs_per_repo: int = 1
     cooldown_days: int = 14           # after a PR to a repo is closed unmerged

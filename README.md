@@ -532,3 +532,26 @@ existing authority. This does not sign agreements, approve spending, change
 safety limits, or implement every repository's custom process. External-only
 linked pages without a pinned repository source must be checked separately;
 the blob freshness guard does not certify those pages.
+
+#### Opt-in breadth-first coverage experiment
+
+`discovery_strategy: breadth-first` (or `discover --strategy breadth-first`)
+tries six broad repository windows before one preferred window and one history
+window, omitting either affinity turn when its pool is empty. Each broad window
+still contains at most five repositories; six windows cover one 30-repository
+search page. Affinity windows advance on later epochs, including pools larger
+than five repositories. Existing `broad` and `rotate` defaults are unchanged.
+
+This mode has its own `breadth_cursor` in the discovery state, so switching modes
+does not consume the baseline cursor. Partial or rate-limited passes do not
+advance it. The recent-approval list remains shared to avoid resurfacing an
+unchanged accepted lead when switching modes. Query terms, vetting, duplicate
+review, read budget and request pacing are unchanged. Six windows is a bounded
+experiment, not a claim of optimal scheduling or better contribution quality.
+
+Motivation: a seven-turn offline replay using one saved 30-repository page and
+an actual four-repository history pool covered 34 unique repositories with this
+schedule versus 24 with alternating history turns. That measures planned
+repository coverage only, not available bugs, current health, successful patches
+or accepted contributions. Compare actual query/candidate/repeat counts and
+qualified work before adopting this mode for a longer run.
