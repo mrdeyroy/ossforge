@@ -551,3 +551,21 @@ Removing a marker never supplies policy permission. Owner review does not erase 
 origin, waive required disclosure or override source restrictions. Independent fork
 publication is a separate action requiring its own source/target/visibility and owner
 approval checks; it is not implemented by these commands or implied by local success.
+
+### Investigation identity and version compatibility
+
+New repo-first investigations carry a durable `research_id`, copied to proposed
+queue items. A completed-submission checkpoint uses that origin identity, not a
+reused repository checkout path. Legacy records without the identity remain
+unbound: they are preserved but are not retroactively certified as completed.
+Do not backfill their IDs or erase state to obtain a passing checkpoint. Report
+known saved submissions separately. For a new session, retain the old records,
+explicitly defer the finished lead with its actual reason, and start another
+search session only within a newly authorized allowance.
+
+Queue files written by this version contain `research_id`. Older versions whose
+queue parser does not recognize that field refuse to load them. Do not downgrade
+while using the same active state directory or strip fields to bypass that
+refusal. Keep a pre-upgrade backup for rollback, and reconcile any remote effects
+before restoring an older snapshot. A backup may predate a real submission;
+restoring it is not permission to publish again.

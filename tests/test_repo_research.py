@@ -514,3 +514,55 @@ def test_research_checkpoint_labels_valid_saved_review_unvalidated(source_review
     cfg, _, _ = source_review
     result = repo_research.checkpoint(cfg, ['ossforge'])
     assert result['lead']['source_review']['status'] == 'saved_unvalidated'
+
+
+def test_controlled_public_commands_bind_new_investigation_through_submission(tmp_path, monkeypatch, capsys):
+    """Remote sources and submit are fixtures, not a real external contribution."""
+    import json
+    import subprocess
+    import yaml
+    from ossforge import cli
+    setup_sources(monkeypatch)
+    root = tmp_path / 'checkout'
+    root.mkdir()
+    for args in [('init', '-b', 'main'), ('config', 'user.name', 'Test'),
+                 ('config', 'user.email', 'test@example.invalid')]:
+        subprocess.run(['git', *args], cwd=root, check=True, capture_output=True)
+    (root / 'source.py').write_text('def value():\n    return 1\n')
+    subprocess.run(['git', 'add', '.'], cwd=root, check=True)
+    subprocess.run(['git', 'commit', '-m', 'controlled source'], cwd=root, check=True, capture_output=True)
+    tip = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+    monkeypatch.setattr(repo_research.gh, 'api', lambda path, **kw:
+                        {'sha': tip, 'html_url': 'https://example.invalid/commit'} if '/commits/' in path
+                        else {'default_branch': 'main', 'html_url': 'https://example.invalid/repo'})
+    monkeypatch.setattr(repo_research.policy_review, 'check', lambda *a: '')
+    monkeypatch.setattr(repo_research.policy_review, 'publication_route', lambda *a: 'issue_pr')
+    monkeypatch.setattr(repo_research.hunt, 'clone', lambda *a: root)
+    monkeypatch.setattr(repo_research.dedupe, 'find_matches', lambda *a, **kw: [])
+    monkeypatch.setattr(repo_research.dedupe, 'recent_commit_hits', lambda *a, **kw: [])
+    cfg = tmp_path / 'config.yaml'
+    state = tmp_path / 'state'
+    cfg.write_text(yaml.safe_dump({'repo_first': True, 'state_dir': str(state),
+                                   'kill_file': str(tmp_path / 'STOP')}))
+    def run(*args):
+        assert cli.main(['--config', str(cfg), '--json', *args]) == 0
+        return json.loads(capsys.readouterr().out)
+    run('research-session', '--seconds', '3600')
+    selected = run('research-repo')
+    begun = run('research-repo', '--begin')
+    assert selected['research_id'] and selected['research_id'] == begun['research_id']
+    proposed = run('research-propose', 'source.py', '1', '--detail', 'controlled semantic hypothesis')
+    queued = Queue(state / 'queue.json').items[proposed['id']]
+    assert queued.research_id == begun['research_id']
+    # Explicit controlled external boundary. This does NOT test native verification,
+    # publication gates, credentials, or a real issue/PR send.
+    def fixture_submit(item, *args, **kw):
+        assert kw['execute'] is True and item.research_id == begun['research_id']
+        return {'issue': 'https://example.invalid/issues/1', 'pr': 'https://example.invalid/pull/2'}
+    monkeypatch.setattr(cli.submit, 'submit', fixture_submit)
+    run('submit', proposed['id'], '--yes')
+    out = run('agent-next')
+    assert out['status'] == 'contribution_submitted' and out['stop_session']
+    assert out['completed'][0]['saved_pr'] == 'https://example.invalid/pull/2'
+    assert Queue(state / 'queue.json').items[proposed['id']].status == 'submitted'
+    assert repo_research.load(Config(state_dir=str(state)))['lead']['research_id'] == begun['research_id']
